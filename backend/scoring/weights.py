@@ -27,6 +27,8 @@ WEIGHTS: dict[str, float] = {
     "github_early_builder": 5.0,
     "github_prolific": 4.0,
     "shipped_product": 7.0,
+    # education (young / pre-breakout signal)
+    "student_builder": 5.0,
     # hackathon
     "hackathon_win": 5.0,
     "hackathon_finalist": 3.0,

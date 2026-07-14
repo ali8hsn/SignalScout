@@ -48,6 +48,10 @@ class ScoringEngine:
             if other is None:
                 continue
             quality = EDGE_QUALITY.get(edge.edge_type, 0.5)
+            # A founder *choosing to follow* someone is a stronger warm signal
+            # than a stranger following the founder.
+            if edge.edge_type == "github_follows" and edge.metadata.get("direction") == "seed_follows":
+                quality = 0.75
             seeds_touched[other] = max(seeds_touched.get(other, 0.0), quality)
             if latest is None or edge.observed_date > latest:
                 latest = edge.observed_date

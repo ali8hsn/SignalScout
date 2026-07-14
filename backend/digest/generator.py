@@ -65,9 +65,14 @@ class DigestGenerator:
 
     @staticmethod
     def _contactable(candidate: dict) -> bool:
+        """Eligibility gate for the digest: at least two distinct contact methods.
+
+        Real GitHub discoveries rarely expose a LinkedIn URL automatically, so we
+        require any two reachable channels (github/email/x/site/linkedin). The
+        verified-LinkedIn bar stays a MANUAL step for the final hand-picked digest
+        (see scripts/verify_candidates.py)."""
         links = candidate.get("contact_links") or {}
-        others = [k for k in ("x", "email", "site", "github") if k in links]
-        return "linkedin" in links and len(others) >= 1
+        return len([k for k in ("github", "linkedin", "x", "email", "site") if links.get(k)]) >= 2
 
     @staticmethod
     def _school_line(candidate: dict) -> str:

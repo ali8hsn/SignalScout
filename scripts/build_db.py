@@ -5,6 +5,7 @@ entity resolution -> enrichment -> scoring.
 Idempotent: drops and recreates everything. Run: python scripts/build_db.py
 """
 
+import argparse
 import json
 import random
 import sys
@@ -84,11 +85,14 @@ def load_controls(container: Container) -> None:
 
 
 def load_discoveries(container: Container) -> None:
+    """Load the hand-written demo profiles. These are FICTIONAL stand-ins and are
+    tagged cohort='demo' so they never mix with real (live-scraped) discoveries.
+    Only loaded when build_db is run with --with-demo."""
     path = container.settings.seed_signals_dir / "discoveries.json"
     profiles = json.loads(path.read_text())["profiles"]
     for row in profiles:
         container.persons.save(Person(
-            name=row["name"], cohort="discovery",
+            name=row["name"], cohort="demo",
             github_username=row.get("github_username"),
             twitter_handle=row.get("twitter_handle"), email=row.get("email"),
             linkedin_url=row.get("linkedin_url"), personal_site=row.get("personal_site"),
@@ -97,7 +101,7 @@ def load_discoveries(container: Container) -> None:
             current_location=row.get("current_location"),
             area=row.get("area"), thesis=row.get("thesis"),
         ))
-    print(f"  loaded {len(profiles)} discovery candidates")
+    print(f"  loaded {len(profiles)} DEMO (fictional) discovery candidates")
 
 
 def load_signals(container: Container) -> int:
@@ -140,12 +144,23 @@ def enrich(container: Container) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Rebuild the Signal Scout database.")
+    parser.add_argument(
+        "--with-demo", action="store_true",
+        help="Also load the 12 fictional demo discovery profiles (tagged cohort='demo'). "
+             "Off by default so only real, live-scraped discoveries appear.",
+    )
+    args = parser.parse_args()
+
     container = Container()
     print(f"Building {container.settings.db_path} ...")
     container.db.reset()
     load_ground_truth(container)
     load_controls(container)
-    load_discoveries(container)
+    if args.with_demo:
+        load_discoveries(container)
+    else:
+        print("  skipped fictional demo profiles (run with --with-demo to include them)")
     load_signals(container)
     load_edges(container)
     enrich(container)

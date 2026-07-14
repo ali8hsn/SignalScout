@@ -38,7 +38,7 @@ class CandidateService:
     def rescore_all(self) -> dict[str, float]:
         """Score every non-control person as of today, normalize, persist."""
         today = date.today()
-        cohort = [p for p in self.persons.all() if p.cohort in ("founder", "discovery")]
+        cohort = [p for p in self.persons.all() if p.cohort in ("founder", "discovery", "demo")]
         seed_ids = {p.id for p in cohort if p.cohort == "founder"}
         adjusted: dict[str, float] = {}
         for person in cohort:
@@ -47,11 +47,30 @@ class CandidateService:
             conn = self.engine.connection_signal(person, person_edges, seed_ids - {person.id}, today)
             if conn:
                 sigs = sigs + [conn]
-            adjusted[person.id] = self.engine.compute(person, sigs, today).adjusted
+            base = self.engine.compute(person, sigs, today).adjusted
+            adjusted[person.id] = base * self._knownness_factor(person)
         normalized = self.engine.normalize(adjusted)
         for person_id, score in normalized.items():
             self.persons.update_score(person_id, score)
         return normalized
+
+    @staticmethod
+    def _knownness_factor(person: Person) -> float:
+        """Down-weight already-famous accounts so ranking favors pre-breakout people.
+
+        Only applies when we have a GitHub follower count (live discoveries);
+        founders and seeded profiles are unaffected.
+        """
+        followers = (person.contact_info or {}).get("github_followers")
+        if followers is None:
+            return 1.0
+        if followers <= 500:
+            return 1.0
+        if followers <= 1000:
+            return 0.7
+        if followers <= 2000:
+            return 0.5
+        return 0.3
 
     def list_candidates(self, cohort: str | None = "discovery") -> list[dict]:
         people = self.persons.all(cohort) if cohort else [
@@ -109,6 +128,8 @@ class CandidateService:
                 for s in top
             ],
             "signal_count": len(sigs),
+            "github_username": person.github_username,
+            "github_followers": (person.contact_info or {}).get("github_followers"),
             "connection_count": len({e.id for e in seed_edges}),
             "connection_context": self._connection_context(seed_edges, founders_by_id),
             "warm_intro": self._warm_intro(person, seed_edges, founders_by_id),

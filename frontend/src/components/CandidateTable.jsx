@@ -6,14 +6,18 @@ const COLUMNS = [
   { key: 'school', label: 'School' },
   { key: 'area', label: 'Area' },
   { key: 'region', label: 'Location' },
+  { key: 'github_followers', label: 'Followers' },
   { key: 'connection_count', label: 'Connections' },
   { key: 'signal_count', label: 'Signals' },
 ];
+
+const UNKNOWN_FOLLOWER_CAP = 1000;
 
 export default function CandidateTable({ candidates, onSelect }) {
   const [sortKey, setSortKey] = useState('score');
   const [sortDesc, setSortDesc] = useState(true);
   const [areaFilter, setAreaFilter] = useState('All');
+  const [unknownsOnly, setUnknownsOnly] = useState(true);
 
   const areas = useMemo(
     () => ['All', ...new Set(candidates.map((c) => c.area).filter(Boolean))],
@@ -21,14 +25,19 @@ export default function CandidateTable({ candidates, onSelect }) {
   );
 
   const rows = useMemo(() => {
-    const filtered = areaFilter === 'All' ? candidates : candidates.filter((c) => c.area === areaFilter);
+    let filtered = areaFilter === 'All' ? candidates : candidates.filter((c) => c.area === areaFilter);
+    if (unknownsOnly) {
+      filtered = filtered.filter(
+        (c) => c.github_followers == null || c.github_followers <= UNKNOWN_FOLLOWER_CAP,
+      );
+    }
     return [...filtered].sort((a, b) => {
       const av = a[sortKey] ?? '';
       const bv = b[sortKey] ?? '';
       const cmp = typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv));
       return sortDesc ? -cmp : cmp;
     });
-  }, [candidates, sortKey, sortDesc, areaFilter]);
+  }, [candidates, sortKey, sortDesc, areaFilter, unknownsOnly]);
 
   const toggleSort = (key) => {
     if (key === sortKey) setSortDesc(!sortDesc);
@@ -49,6 +58,15 @@ export default function CandidateTable({ candidates, onSelect }) {
         >
           {areas.map((a) => <option key={a}>{a}</option>)}
         </select>
+        <label className="flex items-center gap-1.5 label-mono cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={unknownsOnly}
+            onChange={(e) => setUnknownsOnly(e.target.checked)}
+            className="accent-olive"
+          />
+          unknowns only
+        </label>
         <span className="label-mono ml-auto">{rows.length} candidates</span>
       </div>
       <div className="bg-card border border-line rounded-md overflow-hidden">
@@ -79,6 +97,9 @@ export default function CandidateTable({ candidates, onSelect }) {
                 <td className="px-4 py-2.5 text-ink-soft">{c.school || '—'}</td>
                 <td className="px-4 py-2.5 text-ink-soft">{c.area || '—'}</td>
                 <td className="px-4 py-2.5 text-ink-soft">{c.region || c.current_location || '—'}</td>
+                <td className="px-4 py-2.5 font-mono">
+                  {c.github_followers == null ? '—' : c.github_followers.toLocaleString()}
+                </td>
                 <td className="px-4 py-2.5 font-mono">{c.connection_count}</td>
                 <td className="px-4 py-2.5 font-mono">{c.signal_count}</td>
               </tr>

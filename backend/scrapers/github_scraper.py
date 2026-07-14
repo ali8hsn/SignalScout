@@ -5,6 +5,7 @@ data/seed_signals/github_seeded.json so the demo never breaks (locked decision).
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 
 import requests
@@ -16,6 +17,42 @@ from backend.scrapers.base import BaseScraper
 logger = logging.getLogger(__name__)
 
 API = "https://api.github.com"
+
+# Bio parsing: signals that a GitHub user is a current student / early-career builder.
+STUDENT_KEYWORDS = re.compile(
+    r"\b(student|undergrad(?:uate)?|freshman|sophomore|junior|senior|"
+    r"high\s?school|hs\s|phd|ph\.d|masters|m\.?sc|b\.?sc|studying|"
+    r"class\s+of|incoming|rising|first[-\s]?year|grad\s+student)\b",
+    re.IGNORECASE,
+)
+UNIVERSITY_HINT = re.compile(
+    r"\b(mit|stanford|berkeley|cmu|carnegie\s+mellon|caltech|harvard|princeton|"
+    r"waterloo|toronto|gatech|georgia\s+tech|nyu|ucla|ucsd|uiuc|uw|"
+    r"university|college|institute\s+of\s+technology|\.edu)\b",
+    re.IGNORECASE,
+)
+
+
+def parse_grad_year(bio: str | None) -> int | None:
+    """Best-effort graduation-year parse from a GitHub bio ('class of 2027', ''27')."""
+    if not bio:
+        return None
+    m = re.search(r"class\s+of\s+(20\d{2})", bio, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"'(2\d)\b", bio)
+    if m:
+        return 2000 + int(m.group(1))
+    m = re.search(r"\b(20[2-3]\d)\s+grad", bio, re.IGNORECASE)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def looks_like_student(bio: str | None) -> bool:
+    if not bio:
+        return False
+    return bool(STUDENT_KEYWORDS.search(bio) or UNIVERSITY_HINT.search(bio))
 
 
 class GithubClient:
@@ -78,8 +115,8 @@ class GithubScraper(BaseScraper):
                 logger.warning("github scrape failed for %s: %s", username, exc)
         return signals
 
-    def scrape_user(self, username: str) -> list[Signal]:
-        user = self.client.user(username)
+    def scrape_user(self, username: str, user: dict | None = None) -> list[Signal]:
+        user = user or self.client.user(username)
         if not user:
             return []
         name = self.display_names.get(username) or user.get("name") or username
@@ -139,6 +176,19 @@ class GithubScraper(BaseScraper):
                     signal_date=today, signal_strength=0.5, source="github",
                     source_url=user.get("html_url", ""),
                     summary=f"{len(repos)}+ public repos, sustained output",
+                    raw_data=profile,
+                )
+            )
+
+        # Student / early-career builder: bio says they are currently in school.
+        bio = user.get("bio") or ""
+        if looks_like_student(bio):
+            signals.append(
+                Signal(
+                    person_name=name, signal_type="student_builder", signal_category="education",
+                    signal_date=today, signal_strength=0.7, source="github",
+                    source_url=user.get("html_url", ""),
+                    summary=f'Bio reads as a current student/early builder: "{bio[:90]}"',
                     raw_data=profile,
                 )
             )
