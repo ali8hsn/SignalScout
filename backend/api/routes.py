@@ -59,6 +59,20 @@ def build_router(container: Container) -> APIRouter:
         digest = container.digest_generator.generate()
         return {"digest": _digest_dict(digest)}
 
+    @router.post("/discovery/run")
+    def run_discovery():
+        try:
+            job_id = container.discovery_job.start()
+        except RuntimeError as exc:  # already running
+            raise HTTPException(status_code=409, detail=str(exc))
+        except ValueError as exc:  # missing GITHUB_TOKEN
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"job_id": job_id, "status": container.discovery_job.status()}
+
+    @router.get("/discovery/status")
+    def discovery_status():
+        return container.discovery_job.status()
+
     @router.post("/digests/send")
     def send_digest():
         digest = container.digests.latest()

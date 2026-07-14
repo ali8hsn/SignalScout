@@ -17,6 +17,7 @@ from backend.enrichment.locations import LocationResolver
 from backend.scoring.backtest import BacktestRunner
 from backend.scoring.engine import ScoringEngine
 from backend.services.candidate_service import CandidateService
+from backend.services.discovery_job import DiscoveryJobManager
 
 
 class Container:
@@ -45,3 +46,6 @@ class Container:
             self.candidate_service, self.digests, self.settings.out_dir, self.settings.digest_size
         )
         self.email_sender = NoopSender()
+        self.discovery_job = DiscoveryJobManager(
+            self.settings, container_factory=lambda: Container(self.settings)
+        )

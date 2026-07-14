@@ -58,7 +58,12 @@ class BacktestRunner:
             breakdown = self.engine.compute(control, sigs, today)
             control_adjusted[control.id] = breakdown.adjusted
 
-        normalized = self.engine.normalize({**founder_adjusted, **control_adjusted})
+        # Calibrate against the strong-founder pack (median of top-N pre-breakout
+        # scores), not the single max, so one outlier can't crush the field.
+        reference = self.engine.reference_from(founder_adjusted.values())
+        normalized = self.engine.normalize_calibrated(
+            {**founder_adjusted, **control_adjusted}, reference
+        )
 
         results = []
         flagged_count = 0

@@ -26,6 +26,10 @@ class Settings:
     recency_window_days: int = 730
     digest_size: int = 8
 
+    # Live "Run Discovery" knobs — kept small so an on-camera run finishes in ~1-2 min.
+    discovery_seed_limit: int = field(default_factory=lambda: int(os.environ.get("DISCOVERY_SEED_LIMIT", "4")))
+    discovery_max_per_seed: int = field(default_factory=lambda: int(os.environ.get("DISCOVERY_MAX_PER_SEED", "30")))
+
 
 def load_settings() -> Settings:
     return Settings()

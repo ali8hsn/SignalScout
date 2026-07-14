@@ -9,6 +9,7 @@ from backend.db.repositories.signals import SignalRepository
 from backend.domain.graph_edge import EDGE_QUALITY, GraphEdge
 from backend.domain.person import Person
 from backend.scoring.engine import ScoreBreakdown, ScoringEngine
+from backend.scoring.reference import founder_reference
 
 EDGE_VERBS = {
     "github_follows": "follows them on GitHub",
@@ -36,7 +37,9 @@ class CandidateService:
         self.flag_threshold = flag_threshold
 
     def rescore_all(self) -> dict[str, float]:
-        """Score every non-control person as of today, normalize, persist."""
+        """Score every non-control person as of today and persist, calibrated
+        against the strong-founder pack so a discovery's 0-100 score means
+        'how founder-like' on the same scale the backtest uses."""
         today = date.today()
         cohort = [p for p in self.persons.all() if p.cohort in ("founder", "discovery", "demo")]
         seed_ids = {p.id for p in cohort if p.cohort == "founder"}
@@ -49,7 +52,8 @@ class CandidateService:
                 sigs = sigs + [conn]
             base = self.engine.compute(person, sigs, today).adjusted
             adjusted[person.id] = base * self._knownness_factor(person)
-        normalized = self.engine.normalize(adjusted)
+        reference = founder_reference(self.persons, self.signals, self.edges, self.engine)
+        normalized = self.engine.normalize_calibrated(adjusted, reference)
         for person_id, score in normalized.items():
             self.persons.update_score(person_id, score)
         return normalized

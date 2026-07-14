@@ -4,6 +4,10 @@
     "vbuterin", "dfield", "colah", "zachlatta", "sahillavingia", "evanw",
     "suhail", "pc", "dcgross", "pedrofranceschi", "delian"
   ],
+  "_demo_note": "Scoped seeds for the live 'Run Discovery' demo. These are young, low-follower prior discoveries (students / competitive-programming builders) whose GitHub orbits are dense with unexplored peers, so a scoped run reliably surfaces fresh unknowns on camera. Falls back to github_seeds if these accounts aren't present in the DB.",
+  "demo_seeds": [
+    "benchislett", "cloneofsimo", "Mikubill"
+  ],
   "twitter_seeds": [
     "VitalikButerin", "alexandr_wang", "zoink", "ch402", "zachlatta", "shl",
     "Suhail", "patrickc", "danielgross", "zebulgar"

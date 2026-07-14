@@ -13,7 +13,8 @@ const COLUMNS = [
 
 const UNKNOWN_FOLLOWER_CAP = 1000;
 
-export default function CandidateTable({ candidates, onSelect }) {
+export default function CandidateTable({ candidates, onSelect, highlightIds }) {
+  const highlight = highlightIds instanceof Set ? highlightIds : new Set(highlightIds || []);
   const [sortKey, setSortKey] = useState('score');
   const [sortDesc, setSortDesc] = useState(true);
   const [areaFilter, setAreaFilter] = useState('All');
@@ -90,10 +91,17 @@ export default function CandidateTable({ candidates, onSelect }) {
               <tr
                 key={c.id}
                 onClick={() => onSelect(c)}
-                className="border-b border-line-soft last:border-0 hover:bg-cream cursor-pointer"
+                className={`border-b border-line-soft last:border-0 hover:bg-cream cursor-pointer ${
+                  highlight.has(c.id) ? 'bg-olive/10' : ''
+                }`}
               >
                 <td className="px-4 py-2.5 font-mono text-olive">{Math.round(c.score)}</td>
-                <td className="px-4 py-2.5 font-display text-[15px]">{c.name}</td>
+                <td className="px-4 py-2.5 font-display text-[15px]">
+                  {c.name}
+                  {highlight.has(c.id) && (
+                    <span className="ml-2 font-mono text-[9px] tracking-widest text-olive align-middle">NEW</span>
+                  )}
+                </td>
                 <td className="px-4 py-2.5 text-ink-soft">{c.school || '—'}</td>
                 <td className="px-4 py-2.5 text-ink-soft">{c.area || '—'}</td>
                 <td className="px-4 py-2.5 text-ink-soft">{c.region || c.current_location || '—'}</td>

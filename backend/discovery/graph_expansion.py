@@ -9,6 +9,7 @@ build_db.py — discovery never blocks the demo.
 """
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from backend.db.repositories.graph_edges import GraphEdgeRepository
@@ -30,7 +31,11 @@ class GraphExpander:
         self.edges = edges
 
     def expand(
-        self, seed_usernames: list[str], max_per_seed: int = 60, follower_cap: int = 2000
+        self,
+        seed_usernames: list[str],
+        max_per_seed: int = 60,
+        follower_cap: int = 2000,
+        on_progress: Callable[[str, int], None] | None = None,
     ) -> list[Person]:
         """One hop out from each seed, along both follow directions.
 
@@ -38,7 +43,15 @@ class GraphExpander:
         `follows_seed`  = this person follows the seed founder (lower-signal).
         A candidate is kept only if unknown (see `_is_unknown`) and has at least
         one independent signal on their own GitHub profile.
+
+        `on_progress(stage, count)` (optional) is called with live counts for the
+        "scrape" (profiles inspected) and "resolve" (unknowns kept) stages so a UI
+        can animate the pipeline as it runs.
         """
+        def tick(stage: str, count: int) -> None:
+            if on_progress:
+                on_progress(stage, count)
+
         # login -> list[(seed_person, direction)]
         candidate_links: dict[str, list[tuple[Person, str]]] = {}
         for seed in seed_usernames:
@@ -55,11 +68,14 @@ class GraphExpander:
                         candidate_links.setdefault(login, []).append((seed_person, direction))
 
         discovered: list[Person] = []
+        scraped = 0
         today = datetime.now(timezone.utc).date().isoformat()
         for login, links in candidate_links.items():
             if self.persons.find_by_github(login):
                 continue  # already known (founder or prior discovery)
             profile = self.scraper.client.user(login)
+            scraped += 1
+            tick("scrape", scraped)
             if not self._is_unknown(profile, follower_cap):
                 continue
             signals = self.scraper.scrape_user(login, user=profile)
@@ -86,6 +102,7 @@ class GraphExpander:
                 edges.append(edge)
             self.edges.save_many(edges)
             discovered.append(person)
+            tick("resolve", len(discovered))
             logger.info("discovered %s (%d seed links)", login, len(links))
         return discovered
 

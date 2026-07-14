@@ -6,6 +6,7 @@ shown in the evidence UI ("USACO Gold 0.7x6.0 = 4.2 ...").
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from statistics import median
 
 from backend.domain.graph_edge import EDGE_QUALITY, GraphEdge
 from backend.domain.person import Person
@@ -110,13 +111,50 @@ class ScoringEngine:
 
     @staticmethod
     def normalize(adjusted_scores: dict[str, float]) -> dict[str, float]:
-        """Min-max normalize adjusted scores to 0-100 across the cohort."""
+        """Min-max normalize adjusted scores to 0-100 across the cohort.
+
+        Deprecated for the pitch path: a single dominant account pins itself at
+        100 and crushes everyone else. Kept only for callers that explicitly want
+        relative-to-max scaling. Prefer `normalize_calibrated`.
+        """
         if not adjusted_scores:
             return {}
         top = max(adjusted_scores.values())
         if top <= 0:
             return {k: 0.0 for k in adjusted_scores}
         return {k: round(100.0 * v / top, 1) for k, v in adjusted_scores.items()}
+
+    @staticmethod
+    def reference_from(values, top_n: int = 10) -> float:
+        """Outlier-robust reference scale: the median of the top-N adjusted scores.
+
+        Using the median of the strong cohort (rather than the single max) means a
+        lone outlier 2x above the pack no longer defines 100 — the pack lands at
+        ~100 and the field spreads honestly beneath it.
+        """
+        positive = sorted((v for v in values if v > 0), reverse=True)
+        if not positive:
+            return 1.0
+        top = positive[: max(1, top_n)]
+        ref = median(top)
+        return ref if ref > 0 else 1.0
+
+    @staticmethod
+    def normalize_calibrated(adjusted_scores: dict[str, float], reference: float) -> dict[str, float]:
+        """Scale adjusted scores against a fixed reference, capped at 100.
+
+        score = min(100, 100 * adjusted / reference). Because `reference` is a
+        stable robust statistic (see `reference_from`), the same call produces
+        directly comparable scores across founders, controls, and discoveries —
+        a discovery scoring 15 genuinely means '15/100 as founder-like as the
+        strong-founder pack'.
+        """
+        if reference <= 0:
+            return {k: 0.0 for k in adjusted_scores}
+        return {
+            k: round(min(100.0, 100.0 * v / reference), 1)
+            for k, v in adjusted_scores.items()
+        }
 
     @staticmethod
     def _parse(iso: str) -> date:
