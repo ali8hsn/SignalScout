@@ -1,0 +1,11 @@
+{
+  "_note": "Seed GitHub accounts for live scraping + graph expansion. These are the 'orbit' accounts: known founders whose followers are worth cross-referencing.",
+  "github_seeds": [
+    "vbuterin", "dfield", "colah", "zachlatta", "sahillavingia", "evanw",
+    "suhail", "pc", "dcgross", "pedrofranceschi", "delian"
+  ],
+  "twitter_seeds": [
+    "VitalikButerin", "alexandr_wang", "zoink", "ch402", "zachlatta", "shl",
+    "Suhail", "patrickc", "danielgross", "zebulgar"
+  ]
+}

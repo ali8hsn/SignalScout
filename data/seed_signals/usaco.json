@@ -1,0 +1,12 @@
+{
+  "source": "usaco",
+  "category": "competition",
+  "signals": [
+    {"person_name": "Alexandr Wang", "signal_type": "usaco_camp", "signal_date": "2013-06-01", "signal_strength": 1.0, "summary": "USACO training camp finalist", "source_url": "http://usaco.org/index.php?page=finalists13", "metadata": {"state": "NM"}},
+    {"person_name": "Maya Krishnan", "signal_type": "usaco_platinum", "signal_date": "2022-12-17", "signal_strength": 0.85, "summary": "USACO Platinum division, top 5% nationally", "source_url": "http://usaco.org/index.php?page=dec22results", "metadata": {"state": "NC"}},
+    {"person_name": "Grace Liu", "signal_type": "usaco_platinum", "signal_date": "2023-02-25", "signal_strength": 0.85, "summary": "USACO Platinum promotion as a sophomore", "source_url": "http://usaco.org/index.php?page=feb23results", "metadata": {"state": "CA"}},
+    {"person_name": "Daniel Okafor", "signal_type": "usaco_gold", "signal_date": "2022-01-30", "signal_strength": 0.7, "summary": "USACO Gold division", "source_url": "http://usaco.org/index.php?page=jan22results", "metadata": {"state": "GA"}},
+    {"person_name": "Sam Whitfield", "signal_type": "usaco_gold", "signal_date": "2024-01-28", "signal_strength": 0.7, "summary": "USACO Gold as a freshman — unusually early", "source_url": "http://usaco.org/index.php?page=jan24results", "metadata": {"state": "NC"}},
+    {"person_name": "Ethan Zhao", "signal_type": "usaco_camp", "signal_date": "2024-06-01", "signal_strength": 1.0, "summary": "USACO camp finalist, youngest of the cohort", "source_url": "http://usaco.org/index.php?page=finalists24", "metadata": {"state": "CA"}}
+  ]
+}

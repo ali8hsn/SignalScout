@@ -1,0 +1,18 @@
+# generated artifacts
+signal_scout.db
+out/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# node
+node_modules/
+frontend/dist/
+
+# local editor config
+.cursor/
+
+# env
+.env

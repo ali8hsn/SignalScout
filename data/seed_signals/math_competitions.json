@@ -1,0 +1,12 @@
+{
+  "source": "math_competitions",
+  "category": "competition",
+  "signals": [
+    {"person_name": "Alexandr Wang", "signal_type": "usamo_qualifier", "signal_date": "2013-04-15", "signal_strength": 0.75, "summary": "USAMO qualifier", "metadata": {"state": "NM"}},
+    {"person_name": "Delian Asparouhov", "signal_type": "physics_olympiad", "signal_date": "2010-05-01", "signal_strength": 0.7, "summary": "USA Physics Olympiad semifinalist", "metadata": {"state": "WA"}},
+    {"person_name": "Ethan Zhao", "signal_type": "usamo_qualifier", "signal_date": "2024-04-10", "signal_strength": 0.75, "summary": "USAMO qualifier as a junior", "metadata": {"state": "CA"}},
+    {"person_name": "Hana Sato", "signal_type": "usamo_qualifier", "signal_date": "2024-04-10", "signal_strength": 0.75, "summary": "USAMO qualifier, top 50 finish", "metadata": {"state": "NH"}},
+    {"person_name": "Sofia Alvarez", "signal_type": "aime_qualifier", "signal_date": "2023-03-01", "signal_strength": 0.5, "summary": "AIME qualifier two years running", "metadata": {"state": "NY"}},
+    {"person_name": "Maya Krishnan", "signal_type": "aime_qualifier", "signal_date": "2022-03-01", "signal_strength": 0.5, "summary": "AIME qualifier", "metadata": {"state": "NC"}}
+  ]
+}

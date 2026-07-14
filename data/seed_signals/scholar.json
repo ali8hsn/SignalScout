@@ -1,0 +1,15 @@
+{
+  "source": "semantic_scholar",
+  "category": "research",
+  "signals": [
+    {"person_name": "Laura Deming", "signal_type": "research_paper", "signal_date": "2010-06-01", "signal_strength": 0.6, "summary": "Co-authored longevity research from the Kenyon lab", "metadata": {"co_authors": ["Cynthia Kenyon"]}},
+    {"person_name": "Thomas Sohmers", "signal_type": "research_paper", "signal_date": "2011-06-01", "signal_strength": 0.6, "summary": "Research output from MIT's Institute for Soldier Nanotechnologies at 14", "metadata": {}},
+    {"person_name": "Chris Olah", "signal_type": "cited_paper", "signal_date": "2014-01-15", "signal_strength": 0.85, "summary": "Widely-cited visualization work on neural networks, no degree", "metadata": {"citations": 400}},
+    {"person_name": "Amber Yang", "signal_type": "research_paper", "signal_date": "2016-11-01", "signal_strength": 0.6, "summary": "First-author paper on orbital debris tracking with CNNs", "metadata": {}},
+    {"person_name": "Erin Smith", "signal_type": "research_paper", "signal_date": "2017-09-01", "signal_strength": 0.6, "summary": "Published facial-micro-expression biomarker research", "metadata": {}},
+    {"person_name": "Maya Krishnan", "signal_type": "co_authored_paper", "signal_date": "2025-03-01", "signal_strength": 0.8, "summary": "Co-authored interpretability paper with a known AI researcher", "metadata": {"co_authors": ["Ian Goodfellow"], "author_email": "mayak@mit.edu"}},
+    {"person_name": "Priya Natarajan", "signal_type": "research_paper", "signal_date": "2024-08-15", "signal_strength": 0.6, "summary": "First-author bioinformatics preprint, 40+ citations in a year", "metadata": {"citations": 43, "author_email": "priya.natarajan@duke.edu"}},
+    {"person_name": "Nina Petrova", "signal_type": "cited_paper", "signal_date": "2025-01-20", "signal_strength": 0.85, "summary": "Undergrad first-author paper cited by three major labs", "metadata": {"citations": 120, "co_authors": ["Ian Goodfellow"], "author_email": "n.petrova@mail.utoronto.ca"}},
+    {"person_name": "Arjun Mehta", "signal_type": "co_authored_paper", "signal_date": "2024-11-05", "signal_strength": 0.8, "summary": "Co-authored systems paper on efficient inference scheduling", "metadata": {"co_authors": ["Ian Goodfellow"]}}
+  ]
+}

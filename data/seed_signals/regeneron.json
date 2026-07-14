@@ -1,0 +1,15 @@
+{
+  "source": "regeneron",
+  "category": "research",
+  "signals": [
+    {"person_name": "Erin Smith", "signal_type": "isef_award", "signal_date": "2017-05-19", "signal_strength": 0.75, "summary": "ISEF award — computer vision for Parkinson's detection", "metadata": {"state": "KS"}},
+    {"person_name": "Amber Yang", "signal_type": "isef_award", "signal_date": "2016-05-13", "signal_strength": 0.75, "summary": "ISEF award — neural networks for space debris tracking", "metadata": {"state": "FL"}},
+    {"person_name": "Cathy Tie", "signal_type": "science_fair_win", "signal_date": "2013-05-01", "signal_strength": 0.7, "summary": "Sanofi BioGENEius Challenge Canada winner", "metadata": {"country": "Canada"}},
+    {"person_name": "Patrick Collison", "signal_type": "science_fair_win", "signal_date": "2005-01-14", "signal_strength": 0.9, "summary": "BT Young Scientist of the Year (new LISP dialect, Croma)", "metadata": {"country": "Ireland"}},
+    {"person_name": "Austin Russell", "signal_type": "science_fair_win", "signal_date": "2011-05-01", "signal_strength": 0.7, "summary": "Optics research recognized; patent filed at 16", "metadata": {"state": "CA"}},
+    {"person_name": "Boyan Slat", "signal_type": "science_fair_win", "signal_date": "2012-05-01", "signal_strength": 0.7, "summary": "Best Technical Design award, TU Delft, for ocean cleanup concept", "metadata": {"country": "Netherlands"}},
+    {"person_name": "Priya Natarajan", "signal_type": "regeneron_sts_finalist", "signal_date": "2023-01-24", "signal_strength": 0.9, "summary": "Regeneron STS finalist — protein folding heuristics", "metadata": {"state": "NC"}},
+    {"person_name": "Maya Krishnan", "signal_type": "isef_award", "signal_date": "2023-05-18", "signal_strength": 0.75, "summary": "ISEF grand award, systems software category", "metadata": {"state": "NC"}},
+    {"person_name": "Grace Liu", "signal_type": "isef_award", "signal_date": "2024-05-16", "signal_strength": 0.75, "summary": "ISEF award — ML for wildfire smoke prediction", "metadata": {"state": "CA"}}
+  ]
+}

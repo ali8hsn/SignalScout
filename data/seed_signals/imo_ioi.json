@@ -1,0 +1,9 @@
+{
+  "source": "imo_ioi",
+  "category": "competition",
+  "signals": [
+    {"person_name": "Vitalik Buterin", "signal_type": "ioi_medal", "signal_date": "2012-09-28", "signal_strength": 0.8, "summary": "IOI 2012 bronze medal (Canada)", "source_url": "https://stats.ioinformatics.org/people/1849", "metadata": {"medal": "bronze", "country": "Canada"}},
+    {"person_name": "Hana Sato", "signal_type": "imo_medal", "signal_date": "2025-07-15", "signal_strength": 0.8, "summary": "IMO 2025 bronze medal (USA team)", "metadata": {"medal": "bronze", "country": "USA"}},
+    {"person_name": "Ethan Zhao", "signal_type": "ioi_medal", "signal_date": "2025-08-10", "signal_strength": 0.9, "summary": "IOI 2025 silver medal (USA team)", "metadata": {"medal": "silver", "country": "USA"}}
+  ]
+}

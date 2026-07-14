@@ -1,0 +1,13 @@
+{
+  "source": "devpost",
+  "category": "hackathon",
+  "signals": [
+    {"person_name": "Delian Asparouhov", "signal_type": "hackathon_win", "signal_date": "2012-10-01", "signal_strength": 0.6, "summary": "HackMIT winner", "metadata": {"event": "HackMIT"}},
+    {"person_name": "Zach Latta", "signal_type": "hackathon_win", "signal_date": "2014-02-15", "signal_strength": 0.6, "summary": "Back-to-back wins at LA-area high school hackathons", "metadata": {"event": "hsHacks"}},
+    {"person_name": "Lucas Meyer", "signal_type": "hackathon_win", "signal_date": "2024-09-15", "signal_strength": 0.6, "summary": "Hack the North winner — local-first sync engine", "metadata": {"event": "Hack the North", "teammates": ["Daniel Okafor"]}},
+    {"person_name": "Daniel Okafor", "signal_type": "hackathon_win", "signal_date": "2024-09-15", "signal_strength": 0.6, "summary": "Hack the North winner — local-first sync engine", "metadata": {"event": "Hack the North", "teammates": ["Lucas Meyer"]}},
+    {"person_name": "Tomas Berg", "signal_type": "hackathon_win", "signal_date": "2025-02-20", "signal_strength": 0.6, "summary": "HackTX winner — GPU kernel autotuner", "metadata": {"event": "HackTX"}},
+    {"person_name": "Tomas Berg", "signal_type": "hackathon_finalist", "signal_date": "2024-10-05", "signal_strength": 0.4, "summary": "CalHacks finalist", "metadata": {"event": "CalHacks"}},
+    {"person_name": "Sam Whitfield", "signal_type": "hackathon_win", "signal_date": "2025-03-22", "signal_strength": 0.6, "summary": "HackNC winner, youngest team on the floor", "metadata": {"event": "HackNC"}}
+  ]
+}

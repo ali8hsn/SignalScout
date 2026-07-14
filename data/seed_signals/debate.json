@@ -1,0 +1,8 @@
+{
+  "source": "debate",
+  "category": "debate",
+  "signals": [
+    {"person_name": "Sofia Alvarez", "signal_type": "debate_nationals", "signal_date": "2024-06-16", "signal_strength": 0.55, "summary": "NSDA Nationals octofinalist, Lincoln-Douglas", "metadata": {"event": "NSDA Nationals"}},
+    {"person_name": "Joshua Browder", "signal_type": "debate_nationals", "signal_date": "2014-03-01", "signal_strength": 0.55, "summary": "National debate circuit finalist (UK)", "metadata": {"country": "UK"}}
+  ]
+}

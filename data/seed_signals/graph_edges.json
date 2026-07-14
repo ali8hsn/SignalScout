@@ -1,0 +1,40 @@
+{
+  "_note": "Typed connection edges. source_name -> target_name. observed_date matters: backtest only counts edges observed before breakout.",
+  "edges": [
+    {"source_name": "Pedro Franceschi", "target_name": "Henrique Dubugras", "edge_type": "hackathon_teammate", "observed_date": "2012-06-01", "source": "seeded", "metadata": {"context": "built Pagar.me together as teenagers"}},
+    {"source_name": "Patrick Collison", "target_name": "John Collison", "edge_type": "fellowship_cohort", "observed_date": "2007-01-01", "source": "seeded", "metadata": {"context": "Auctomatic co-founders"}},
+    {"source_name": "Sahil Lavingia", "target_name": "Zach Latta", "edge_type": "github_follows", "observed_date": "2014-03-01", "source": "seeded"},
+    {"source_name": "Evan Wallace", "target_name": "Dylan Field", "edge_type": "fellowship_cohort", "observed_date": "2012-01-01", "source": "seeded", "metadata": {"context": "Figma co-founders, met at Brown"}},
+    {"source_name": "Cynthia Kenyon", "target_name": "Laura Deming", "edge_type": "co_author", "observed_date": "2010-06-01", "source": "semantic_scholar"},
+    {"source_name": "Delian Asparouhov", "target_name": "Thomas Sohmers", "edge_type": "fellowship_cohort", "observed_date": "2013-06-01", "source": "seeded", "metadata": {"context": "Thiel Fellowship 2013"}},
+    {"source_name": "Daniel Gross", "target_name": "Suhail Doshi", "edge_type": "github_follows", "observed_date": "2010-06-01", "source": "seeded"},
+    {"source_name": "Vitalik Buterin", "target_name": "Shayne Coplan", "edge_type": "twitter_follows", "observed_date": "2019-05-01", "source": "seeded"},
+
+    {"source_name": "Chris Olah", "target_name": "Maya Krishnan", "edge_type": "github_follows", "observed_date": "2024-08-15", "source": "seeded"},
+    {"source_name": "Zach Latta", "target_name": "Maya Krishnan", "edge_type": "github_follows", "observed_date": "2024-10-02", "source": "seeded"},
+    {"source_name": "Suhail Doshi", "target_name": "Maya Krishnan", "edge_type": "github_follows", "observed_date": "2025-04-20", "source": "seeded"},
+    {"source_name": "Ian Goodfellow", "target_name": "Maya Krishnan", "edge_type": "co_author", "observed_date": "2025-03-01", "source": "semantic_scholar", "metadata": {"paper": "interpretability"}},
+
+    {"source_name": "Dylan Field", "target_name": "Lucas Meyer", "edge_type": "github_follows", "observed_date": "2025-01-10", "source": "seeded"},
+    {"source_name": "Evan Wallace", "target_name": "Lucas Meyer", "edge_type": "github_follows", "observed_date": "2024-12-05", "source": "seeded"},
+    {"source_name": "Zach Latta", "target_name": "Lucas Meyer", "edge_type": "mutual_star", "observed_date": "2025-02-14", "source": "seeded", "metadata": {"repo": "driftdb"}},
+    {"source_name": "Lucas Meyer", "target_name": "Daniel Okafor", "edge_type": "hackathon_teammate", "observed_date": "2024-09-15", "source": "devpost", "metadata": {"event": "Hack the North"}},
+
+    {"source_name": "Suhail Doshi", "target_name": "Arjun Mehta", "edge_type": "github_follows", "observed_date": "2025-02-01", "source": "seeded"},
+    {"source_name": "Ian Goodfellow", "target_name": "Arjun Mehta", "edge_type": "co_author", "observed_date": "2024-11-05", "source": "semantic_scholar"},
+
+    {"source_name": "Ian Goodfellow", "target_name": "Nina Petrova", "edge_type": "co_author", "observed_date": "2025-01-20", "source": "semantic_scholar"},
+    {"source_name": "Chris Olah", "target_name": "Nina Petrova", "edge_type": "github_follows", "observed_date": "2025-03-11", "source": "seeded"},
+
+    {"source_name": "Vitalik Buterin", "target_name": "Ethan Zhao", "edge_type": "github_follows", "observed_date": "2025-05-01", "source": "seeded"},
+    {"source_name": "Zach Latta", "target_name": "Ethan Zhao", "edge_type": "github_follows", "observed_date": "2024-11-20", "source": "seeded"},
+
+    {"source_name": "Zach Latta", "target_name": "Sam Whitfield", "edge_type": "github_follows", "observed_date": "2025-04-01", "source": "seeded"},
+    {"source_name": "Sam Whitfield", "target_name": "Maya Krishnan", "edge_type": "mutual_star", "observed_date": "2025-02-20", "source": "seeded", "metadata": {"repo": "microtorch"}},
+
+    {"source_name": "Sahil Lavingia", "target_name": "Tomas Berg", "edge_type": "github_follows", "observed_date": "2025-03-15", "source": "seeded"},
+    {"source_name": "Daniel Gross", "target_name": "Grace Liu", "edge_type": "github_follows", "observed_date": "2025-05-10", "source": "seeded"},
+    {"source_name": "Delian Asparouhov", "target_name": "Priya Natarajan", "edge_type": "twitter_follows", "observed_date": "2025-01-25", "source": "seeded"},
+    {"source_name": "Daniel Okafor", "target_name": "Sofia Alvarez", "edge_type": "hackathon_teammate", "observed_date": "2024-04-10", "source": "devpost", "metadata": {"event": "hsHacks NYC"}}
+  ]
+}
