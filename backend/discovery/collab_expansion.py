@@ -187,4 +187,3 @@ class CollaborationExpander:
             edge.target_person_id = person.id
             edge.target_name = person.name
         self.edges.save_many(group)
-
