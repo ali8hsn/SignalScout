@@ -78,3 +78,21 @@ CREATE TABLE IF NOT EXISTS digests (
     entries TEXT NOT NULL DEFAULT '[]',
     html TEXT NOT NULL DEFAULT ''
 );
+
+-- Licensed-enrichment guardrails (Phase 1). Cache rows (including misses) are
+-- authoritative for 30 days — never re-fetch a person inside the TTL.
+CREATE TABLE IF NOT EXISTS enrichment_cache (
+    cache_key TEXT PRIMARY KEY,  -- '<provider>:<person_id>'
+    provider TEXT NOT NULL,
+    person_id TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',  -- slim provider result; '{}' caches a miss
+    fetched_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_enrichment_cache_person ON enrichment_cache(person_id);
+
+-- One row per UTC day; enforces DAILY_ENRICHMENT_BUDGET (skip, never error).
+CREATE TABLE IF NOT EXISTS enrichment_usage (
+    day TEXT PRIMARY KEY,  -- YYYY-MM-DD (UTC)
+    count INTEGER NOT NULL DEFAULT 0
+);
