@@ -96,3 +96,40 @@ CREATE TABLE IF NOT EXISTS enrichment_usage (
     day TEXT PRIMARY KEY,  -- YYYY-MM-DD (UTC)
     count INTEGER NOT NULL DEFAULT 0
 );
+
+-- Phase 4 email digest subscriptions. Booleans remain INTEGER so the schema is
+-- portable between SQLite and Postgres without backend-specific types.
+CREATE TABLE IF NOT EXISTS subscribers (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly')),
+    preferences TEXT NOT NULL DEFAULT '{}',
+    unsubscribe_token TEXT NOT NULL UNIQUE,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscribers_active_frequency
+    ON subscribers(active, frequency);
+
+-- The composite primary key is the never-repeat guarantee for each subscriber.
+CREATE TABLE IF NOT EXISTS digest_sends (
+    subscriber_id TEXT NOT NULL REFERENCES subscribers(id),
+    person_id TEXT NOT NULL REFERENCES persons(id),
+    sent_at TEXT NOT NULL,
+    provider_message_id TEXT,
+    PRIMARY KEY (subscriber_id, person_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_digest_sends_subscriber
+    ON digest_sends(subscriber_id);
+
+CREATE TABLE IF NOT EXISTS feedback_votes (
+    subscriber_id TEXT NOT NULL REFERENCES subscribers(id),
+    person_id TEXT NOT NULL REFERENCES persons(id),
+    vote TEXT NOT NULL CHECK (vote IN ('up', 'down')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (subscriber_id, person_id)
+);
