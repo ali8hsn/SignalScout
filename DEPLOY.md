@@ -44,7 +44,9 @@ open http://localhost:8000                # the built frontend
 3. Add the rest from `.env.example` as needed:
    - `GITHUB_TOKEN` — enables the live "Run Discovery" pipeline.
    - `ENRICHMENT_PROVIDER`, `PDL_API_KEY` / `CORESIGNAL_API_KEY`, `DAILY_ENRICHMENT_BUDGET` — LinkedIn enrichment.
-   - `RESEND_API_KEY`, `DIGEST_FROM_EMAIL`, `CRON_SECRET` — email digest (Phase 4).
+   - `RESEND_API_KEY`, `DIGEST_FROM_EMAIL`, `PUBLIC_BASE_URL`, `CRON_SECRET` — email digest.
+     Set `PUBLIC_BASE_URL` to the generated Railway origin, for example
+     `https://signalscout-production.up.railway.app` (no trailing slash).
    - `SIGNAL_SCOUT_DB` is **not** needed on Railway (Postgres is used when `DATABASE_URL` is set).
 4. Click **Deploy** on the banner that appears — variable changes trigger a redeploy.
 
@@ -93,23 +95,38 @@ curl https://<your-domain>/api/overview   # → backtest stats + discovery count
 Open the root URL in a browser — the full frontend (Discover / Backtest / Digest) should load
 with all migrated data, no login.
 
-## 8. Daily digest cron (Phase 4 — once the cron endpoint exists)
+## 8. Configure Resend and the daily digest cron
 
-Railway crons work by scheduling a service, but for a single always-on service the simplest
-pattern is an external scheduler hitting the guarded endpoint:
+1. In Resend, verify the domain used by `DIGEST_FROM_EMAIL`, create an API key, and add both
+   values to the app service. Resend controls open tracking at the domain level rather than in
+   the send-email API payload: open the domain's settings and leave **Open tracking** enabled.
+   With either value missing, Signal Scout safely renders previews and records no sends.
+2. Railway cron jobs execute commands. Project canvas → **+ Create** → **Empty Service**, name it
+   `digest-cron`, connect it to the same GitHub repo, and copy the app service variables
+   (`DATABASE_URL`, `RESEND_API_KEY`, `DIGEST_FROM_EMAIL`, and `PUBLIC_BASE_URL`).
+3. Service **Settings** → set its start command to `python scripts/send_digests.py`.
+4. Set **Cron Schedule** to `0 15 * * *` (15:00 UTC = 8:00 AM PDT). Railway schedules in UTC
+   and does not follow DST, so this runs at 7:00 AM PST in winter; use `0 16 * * *` then if
+   8 AM local delivery matters. The command sends daily subscriptions every run and weekly
+   subscriptions only on Monday.
 
-1. Project canvas → **+ Create** → **Empty Service**, name it `digest-cron`.
-2. Service **Settings** → **Cron Schedule**: `0 15 * * *` (15:00 UTC = 8:00 AM PDT; **caveat:**
-   Railway cron is UTC and does not follow DST, so in winter this fires at 7:00 AM PST —
-   change to `0 16 * * *` in November if 8 AM local matters).
-3. Set the service's start command to:
-   `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" https://<your-domain>/api/digest/cron`
-   and add `CRON_SECRET` to its variables (same value as the app service).
-4. Manual trigger for testing:
+The always-on app also exposes an equivalent endpoint protected by the exact header
+`Authorization: Bearer $CRON_SECRET`. Use dry-run first; it renders the selected subscriber's
+HTML/plain-text preview but does not call Resend or consume candidates:
 
 ```bash
-curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://<your-domain>/api/digest/cron
+curl -X POST \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  "https://<your-domain>/api/digest/cron?dry_run=true&recipient=you@example.com"
+
+# Real manual run for one active subscriber:
+curl -X POST \
+  -H "Authorization: Bearer $CRON_SECRET" \
+  "https://<your-domain>/api/digest/cron?recipient=you@example.com"
 ```
+
+For a local command-path preview, run
+`python scripts/send_digests.py --dry-run --recipient you@example.com`.
 
 ## Troubleshooting
 
