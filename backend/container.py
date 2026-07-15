@@ -9,8 +9,13 @@ from backend.db.repositories.enrichment import EnrichmentCacheRepository, Enrich
 from backend.db.repositories.graph_edges import GraphEdgeRepository
 from backend.db.repositories.persons import PersonRepository
 from backend.db.repositories.signals import SignalRepository
+from backend.db.repositories.subscriptions import (
+    DigestSendRepository,
+    FeedbackRepository,
+    SubscriberRepository,
+)
 from backend.digest.generator import DigestGenerator
-from backend.digest.sender import NoopSender
+from backend.digest.sender import ResendSender
 from backend.discovery.concentrations import ConcentrationDetector
 from backend.discovery.entity_resolution import EntityResolver
 from backend.enrichment.contacts import ContactEnricher
@@ -20,18 +25,22 @@ from backend.scoring.backtest import BacktestRunner
 from backend.scoring.engine import ScoringEngine
 from backend.services.candidate_service import CandidateService
 from backend.services.discovery_job import DiscoveryJobManager
+from backend.services.subscriber_digest import SubscriberDigestService
 
 
 class Container:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or load_settings()
-        self.db = Database(self.settings.db_path)
+        self.db = Database(self.settings.db_path, database_url=self.settings.database_url)
 
         self.persons = PersonRepository(self.db)
         self.signals = SignalRepository(self.db)
         self.edges = GraphEdgeRepository(self.db)
         self.concentrations = ConcentrationRepository(self.db)
         self.digests = DigestRepository(self.db)
+        self.subscribers = SubscriberRepository(self.db)
+        self.digest_sends = DigestSendRepository(self.db)
+        self.feedback = FeedbackRepository(self.db)
 
         self.engine = ScoringEngine(self.settings.recency_window_days)
         self.resolver = EntityResolver(self.persons, self.signals, self.edges)
@@ -53,7 +62,18 @@ class Container:
         self.digest_generator = DigestGenerator(
             self.candidate_service, self.digests, self.settings.out_dir, self.settings.digest_size
         )
-        self.email_sender = NoopSender()
+        self.email_sender = ResendSender(
+            self.settings.resend_api_key,
+            self.settings.digest_from_email,
+        )
+        self.subscriber_digest = SubscriberDigestService(
+            self.subscribers,
+            self.digest_sends,
+            self.candidate_service,
+            self.email_sender,
+            self.settings.public_base_url,
+            size=10,
+        )
         self.discovery_job = DiscoveryJobManager(
             self.settings, container_factory=lambda: Container(self.settings)
         )

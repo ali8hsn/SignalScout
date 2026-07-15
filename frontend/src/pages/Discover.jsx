@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 import CandidateCard from '../components/CandidateCard.jsx';
 import CandidateTable from '../components/CandidateTable.jsx';
+import DigestSignup from '../components/DigestSignup.jsx';
 import EvidencePanel from '../components/EvidencePanel.jsx';
 import PipelineProgress from '../components/PipelineProgress.jsx';
 
@@ -74,6 +75,7 @@ export default function Discover() {
 
   return (
     <div>
+      <DigestSignup />
       <div className="flex items-center justify-between mb-6">
         <div className="flex gap-1">
           {[['discovery', 'DISCOVERIES'], ['founder', 'GROUND TRUTH']].map(([value, label]) => (

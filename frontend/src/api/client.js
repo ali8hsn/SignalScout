@@ -24,6 +24,11 @@ export const api = {
   latestDigest: () => request('/api/digests/latest'),
   generateDigest: () => request('/api/digests/generate', { method: 'POST' }),
   sendDigest: () => request('/api/digests/send', { method: 'POST' }),
+  subscribe: (payload) => request('/api/subscribers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }),
   runDiscovery: () => request('/api/discovery/run', { method: 'POST' }),
   discoveryStatus: () => request('/api/discovery/status'),
 };

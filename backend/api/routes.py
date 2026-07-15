@@ -1,10 +1,25 @@
 """API routes (spec §16). Thin: every handler delegates to a service from the Container."""
 
+import hmac
+import html
+import re
 from dataclasses import asdict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
 from backend.container import Container
+from backend.digest.sender import EmailMessage, NoopSender
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class SubscriberSignup(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    frequency: str = "daily"
+    signal_interests: str = Field(default="", max_length=1000)
+    seed_accounts: str = Field(default="", max_length=4000)
 
 
 def build_router(container: Container) -> APIRouter:
@@ -14,6 +29,33 @@ def build_router(container: Container) -> APIRouter:
     def health():
         container.db.conn.execute("SELECT 1").fetchone()
         return {"status": "ok", "db": container.db.backend}
+
+    @router.post("/subscribers")
+    def subscribe(payload: SubscriberSignup):
+        email = payload.email.strip().lower()
+        if not EMAIL_RE.fullmatch(email):
+            raise HTTPException(status_code=422, detail="Enter a valid email address.")
+        if payload.frequency not in {"daily", "weekly"}:
+            raise HTTPException(status_code=422, detail="Frequency must be daily or weekly.")
+        seed_accounts = [
+            account.strip()
+            for account in payload.seed_accounts.split(",")
+            if account.strip()
+        ]
+        subscriber = container.subscribers.subscribe(
+            email,
+            payload.frequency,
+            {
+                "signal_interests": payload.signal_interests.strip(),
+                "seed_accounts": seed_accounts,
+            },
+        )
+        return {
+            "subscribed": True,
+            "email": subscriber.email,
+            "frequency": subscriber.frequency,
+            "message": f"You're signed up for the {subscriber.frequency} Signal Scout digest.",
+        }
 
     @router.get("/overview")
     def overview():
@@ -83,8 +125,56 @@ def build_router(container: Container) -> APIRouter:
         digest = container.digests.latest()
         if not digest:
             raise HTTPException(status_code=400, detail="generate a digest first")
-        receipt = container.email_sender.send(digest, to="cory@example.com")
+        receipt = NoopSender().send(
+            EmailMessage(
+                subject=digest.subject,
+                html=digest.html,
+                text="\n".join([digest.subject, *[entry.name for entry in digest.entries]]),
+            ),
+            to="preview@local.invalid",
+        )
         return {"receipt": receipt, "digest": _digest_dict(digest)}
+
+    @router.post("/digest/cron")
+    def run_digest_cron(
+        dry_run: bool = Query(default=False),
+        recipient: str | None = Query(default=None),
+        authorization: str | None = Header(default=None),
+    ):
+        _require_cron_secret(container, authorization)
+        if recipient and not EMAIL_RE.fullmatch(recipient.strip().lower()):
+            raise HTTPException(status_code=422, detail="Recipient must be a valid email address.")
+        return container.subscriber_digest.run_due(
+            dry_run=dry_run,
+            recipient=recipient.strip().lower() if recipient else None,
+        )
+
+    @router.get("/digest/feedback", response_class=HTMLResponse)
+    def digest_feedback(token: str, person_id: str, vote: str):
+        if vote not in {"up", "down"}:
+            return _confirmation_page("That feedback link is not valid.", success=False)
+        subscriber = container.subscribers.get_by_token(token)
+        if not subscriber or not subscriber.active:
+            return _confirmation_page("This feedback link has expired.", success=False)
+        person = container.persons.get(person_id)
+        if not person:
+            return _confirmation_page("That candidate is no longer available.", success=False)
+        container.feedback.upsert(subscriber.id, person_id, vote)
+        label = "useful" if vote == "up" else "not a fit"
+        return _confirmation_page(f"Thanks — you marked {person.name} as {label}.")
+
+    @router.get("/digest/unsubscribe", response_class=HTMLResponse)
+    def digest_unsubscribe(token: str):
+        subscriber = container.subscribers.get_by_token(token)
+        if not subscriber:
+            return _confirmation_page("This unsubscribe link is not valid.", success=False)
+        changed = container.subscribers.deactivate(token)
+        message = (
+            f"{subscriber.email} has been unsubscribed."
+            if changed
+            else f"{subscriber.email} is already unsubscribed."
+        )
+        return _confirmation_page(message)
 
     return router
 
@@ -97,3 +187,29 @@ def _digest_dict(digest) -> dict:
         "entries": [asdict(e) for e in digest.entries],
         "html": digest.html,
     }
+
+
+def _require_cron_secret(container: Container, authorization: str | None) -> None:
+    configured = container.settings.cron_secret
+    if not configured:
+        raise HTTPException(status_code=503, detail="Digest scheduling is not configured.")
+    supplied = ""
+    if authorization and authorization.startswith("Bearer "):
+        supplied = authorization.removeprefix("Bearer ").strip()
+    if not supplied or not hmac.compare_digest(supplied, configured):
+        raise HTTPException(status_code=401, detail="Invalid cron authorization.")
+
+
+def _confirmation_page(message: str, success: bool = True) -> HTMLResponse:
+    title = "All set" if success else "Link unavailable"
+    safe_message = html.escape(message)
+    return HTMLResponse(
+        content=f"""<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<title>{title} · Signal Scout</title></head>
+<body style="margin:0;background:#f5f3ec;color:#1c1b16;font-family:Georgia,serif">
+<main style="max-width:520px;margin:12vh auto;padding:28px">
+<p style="color:#60652b;font:12px ui-monospace,monospace;text-transform:uppercase">Signal Scout</p>
+<h1>{title}</h1><p style="font-size:18px;line-height:1.5">{safe_message}</p>
+</main></body></html>""",
+        status_code=200 if success else 400,
+    )

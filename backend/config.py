@@ -12,6 +12,7 @@ OUT_DIR = ROOT_DIR / "out"
 @dataclass(frozen=True)
 class Settings:
     db_path: Path = field(default_factory=lambda: Path(os.environ.get("SIGNAL_SCOUT_DB", ROOT_DIR / "signal_scout.db")))
+    database_url: str = field(default_factory=lambda: os.environ.get("DATABASE_URL", ""))  # Postgres when set; SQLite otherwise
     github_token: str = field(default_factory=lambda: os.environ.get("GITHUB_TOKEN", ""))
     data_dir: Path = DATA_DIR
     seed_signals_dir: Path = DATA_DIR / "seed_signals"
@@ -35,6 +36,12 @@ class Settings:
     pdl_api_key: str = field(default_factory=lambda: os.environ.get("PDL_API_KEY", ""))
     coresignal_api_key: str = field(default_factory=lambda: os.environ.get("CORESIGNAL_API_KEY", ""))
     daily_enrichment_budget: int = field(default_factory=lambda: int(os.environ.get("DAILY_ENRICHMENT_BUDGET", "100")))
+
+    # Subscriber digest delivery. Missing Resend credentials keeps delivery in preview mode.
+    resend_api_key: str = field(default_factory=lambda: os.environ.get("RESEND_API_KEY", ""))
+    digest_from_email: str = field(default_factory=lambda: os.environ.get("DIGEST_FROM_EMAIL", ""))
+    public_base_url: str = field(default_factory=lambda: os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000"))
+    cron_secret: str = field(default_factory=lambda: os.environ.get("CRON_SECRET", ""))
 
 
 def load_settings() -> Settings:

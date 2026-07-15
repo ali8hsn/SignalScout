@@ -14,6 +14,7 @@ FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 
 def create_app() -> FastAPI:
     container = Container()
+    container.db.init_schema()
     app = FastAPI(title="Signal Scout", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
