@@ -125,6 +125,7 @@ class DiscoveryJobManager:
                 container.signals.save_many(signals)
                 container.contact_enricher.enrich(person, signals)
                 container.location_resolver.resolve(person, signals)
+                container.provider_enricher.enrich(person)  # licensed data; no-op keyless
                 container.persons.save(person)
                 self._set_stage("enrich", count=i)
             self._set_stage("enrich", status="done", count=len(discovered))

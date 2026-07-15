@@ -5,6 +5,7 @@ from backend.config import Settings, load_settings
 from backend.db.database import Database
 from backend.db.repositories.concentrations import ConcentrationRepository
 from backend.db.repositories.digests import DigestRepository
+from backend.db.repositories.enrichment import EnrichmentCacheRepository, EnrichmentUsageRepository
 from backend.db.repositories.graph_edges import GraphEdgeRepository
 from backend.db.repositories.persons import PersonRepository
 from backend.db.repositories.signals import SignalRepository
@@ -14,6 +15,7 @@ from backend.discovery.concentrations import ConcentrationDetector
 from backend.discovery.entity_resolution import EntityResolver
 from backend.enrichment.contacts import ContactEnricher
 from backend.enrichment.locations import LocationResolver
+from backend.enrichment.provider_enricher import ProviderEnricher, build_provider
 from backend.scoring.backtest import BacktestRunner
 from backend.scoring.engine import ScoringEngine
 from backend.services.candidate_service import CandidateService
@@ -35,6 +37,12 @@ class Container:
         self.resolver = EntityResolver(self.persons, self.signals, self.edges)
         self.contact_enricher = ContactEnricher()
         self.location_resolver = LocationResolver(self.settings.school_locations_file)
+        self.enrichment_cache = EnrichmentCacheRepository(self.db)
+        self.enrichment_usage = EnrichmentUsageRepository(self.db)
+        self.provider_enricher = ProviderEnricher(
+            build_provider(self.settings), self.signals, self.enrichment_cache,
+            self.enrichment_usage, self.settings.daily_enrichment_budget,
+        )
         self.candidate_service = CandidateService(
             self.persons, self.signals, self.edges, self.engine, self.settings.flag_threshold
         )
