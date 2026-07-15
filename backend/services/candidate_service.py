@@ -3,6 +3,7 @@ score receipts, connection context, warm-intro paths, and "why now" lines."""
 
 from datetime import date, datetime
 
+from backend.db.repositories.candidate_reviews import CandidateReviewRepository
 from backend.db.repositories.graph_edges import GraphEdgeRepository
 from backend.db.repositories.persons import PersonRepository
 from backend.db.repositories.signals import SignalRepository
@@ -14,7 +15,12 @@ from backend.scoring.reference import founder_reference
 EDGE_VERBS = {
     "github_follows": "follows them on GitHub",
     "mutual_star": "starred their work on GitHub",
+    "starred_repo": "had a repository starred by this candidate",
+    "forked_repo": "had a repository forked by this candidate",
+    "issue_pr_interaction": "received an issue or pull request from this candidate",
     "co_author": "co-authored a paper with them",
+    "co_contributor": "contributes to the same repo as them",
+    "org_mate": "shares a GitHub org with them",
     "hackathon_teammate": "was their hackathon teammate",
     "fellowship_cohort": "shared a fellowship cohort with them",
     "twitter_follows": "follows them on X",
@@ -29,10 +35,12 @@ class CandidateService:
         edges: GraphEdgeRepository,
         engine: ScoringEngine,
         flag_threshold: float,
+        reviews: CandidateReviewRepository | None = None,
     ):
         self.persons = persons
         self.signals = signals
         self.edges = edges
+        self.reviews = reviews
         self.engine = engine
         self.flag_threshold = flag_threshold
 
@@ -114,9 +122,11 @@ class CandidateService:
 
     def _summary(self, person: Person, founders_by_id: dict[str, Person]) -> dict:
         sigs = self.signals.for_person(person.id)
+        review = self.reviews.get(person.id) if self.reviews else None
         person_edges = self.edges.for_person(person.id)
         top = sorted(sigs, key=lambda s: -(s.signal_strength * 1.0))[:3]
         seed_edges = self._seed_edges(person, person_edges, founders_by_id)
+        source_counts = self._source_counts(sigs)
         return {
             "id": person.id, "name": person.name, "cohort": person.cohort,
             "score": person.score, "flagged": (person.score or 0) >= self.flag_threshold,
@@ -128,18 +138,34 @@ class CandidateService:
             "breakout_date": person.breakout_date, "thesis": person.thesis,
             "top_signals": [
                 {"type": s.signal_type, "category": s.signal_category, "summary": s.summary,
-                 "date": s.signal_date, "strength": s.signal_strength}
+                 "date": s.signal_date, "strength": s.signal_strength,
+                 "source": s.source, "source_url": s.source_url}
                 for s in top
             ],
             "signal_count": len(sigs),
+            "source_counts": source_counts,
+            "source_diversity": len(source_counts),
             "github_username": person.github_username,
             "github_followers": (person.contact_info or {}).get("github_followers"),
             "connection_count": len({e.id for e in seed_edges}),
             "connection_context": self._connection_context(seed_edges, founders_by_id),
             "warm_intro": self._warm_intro(person, seed_edges, founders_by_id),
-            "why_now": self._why_now(sigs),
+            "why_now": review.why_now if review and review.why_now else self._why_now(sigs),
+            "reviewed_why_now": review.why_now if review else "",
+            "approval_state": review.state if review else "unreviewed",
+            "approved_at": review.approved_at if review else None,
+            "source_bucket": review.source_bucket if review else "",
+            "contactable": review.contactable if review else False,
+            "primary_evidence_url": review.primary_evidence_url if review else "",
             "contact_links": person.display_contacts(),
             "coverage": self._coverage(sigs),
+            "discovery_origin": person.discovery_origin,
+            "evidence_status": person.evidence_tier or "not_applicable",
+            "evidence_tier": person.evidence_tier,
+            "review_required": person.review_required,
+            "enrichment_status": person.enrichment_status,
+            "enrichment_provider": person.enrichment_provider,
+            "enrichment_updated_at": person.enrichment_updated_at,
         }
 
     def _connection_list(self, person: Person, edges: list[GraphEdge], founders_by_id: dict[str, Person]) -> list[dict]:
@@ -177,7 +203,7 @@ class CandidateService:
             founder = founders_by_id.get(edge.source_person_id) or founders_by_id.get(edge.target_person_id)
             if not founder:
                 continue
-            if edge.edge_type in ("github_follows", "twitter_follows", "mutual_star"):
+            if edge.edge_type in ("github_follows", "twitter_follows"):
                 follows.add(founder.name)
             else:
                 verb = EDGE_VERBS.get(edge.edge_type, "is connected to them")
@@ -217,6 +243,22 @@ class CandidateService:
         if age_days <= 365:
             return f"Latest signal {newest.signal_date[:7]}: {newest.summary}."
         return f"Most recent signal: {newest.summary} ({newest.signal_date[:7]})."
+
+    @staticmethod
+    def _source_counts(signals: list) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for s in signals:
+            counts[s.source] = counts.get(s.source, 0) + 1
+        return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
+
+    def source_mix(self, cohort: str = "discovery") -> dict[str, int]:
+        """Signal counts by source across a cohort — shows whether GitHub's share
+        is actually falling rather than inferring it from a few candidates."""
+        counts: dict[str, int] = {}
+        for person in self.persons.all(cohort):
+            for s in self.signals.for_person(person.id):
+                counts[s.source] = counts.get(s.source, 0) + 1
+        return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
 
     @staticmethod
     def _coverage(signals: list) -> str:

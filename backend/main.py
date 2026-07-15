@@ -1,14 +1,20 @@
 """FastAPI app factory. Run: uvicorn backend.main:app --reload --port 8000"""
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from backend.api.routes import build_router
 from backend.container import Container
 
+FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
 
 def create_app() -> FastAPI:
     container = Container()
+    container.db.init_schema()
     app = FastAPI(title="Signal Scout", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
@@ -17,6 +23,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(build_router(container))
+    # Serve the built frontend (production/Docker). Local dev keeps using Vite on 5173.
+    if FRONTEND_DIST.is_dir():
+        app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
     return app
 
 

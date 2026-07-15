@@ -33,6 +33,7 @@ export default function SignalTimeline({ timeline, breakout }) {
             />
             <div className="absolute bottom-5 left-1/2 -translate-x-1/2 hidden group-hover:block bg-ink text-cream font-mono text-[10px] px-2.5 py-1.5 rounded-sm whitespace-nowrap z-10">
               {t.date} — {t.summary || t.type}
+              {t.source && <span className="text-cream/60"> · {t.source}</span>}
             </div>
           </div>
         ))}

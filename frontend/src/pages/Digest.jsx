@@ -1,41 +1,83 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import ContactLinks from '../components/ContactLinks.jsx';
+import DigestSignup from '../components/DigestSignup.jsx';
 
-export default function Digest() {
+export default function Digest({ operatorMode = false }) {
   const [digest, setDigest] = useState(null);
   const [busy, setBusy] = useState(false);
   const [sendReceipt, setSendReceipt] = useState(null);
+  const [loadState, setLoadState] = useState('loading');
+  const [error, setError] = useState('');
+
+  const loadLatest = () => {
+    setLoadState('loading');
+    setError('');
+    api.latestDigest()
+      .then((d) => {
+        setDigest(d.digest);
+        setLoadState('success');
+      })
+      .catch(() => {
+        setLoadState('error');
+        setError('The latest digest could not be loaded. Try again in a moment.');
+      });
+  };
 
   useEffect(() => {
-    api.latestDigest().then((d) => setDigest(d.digest)).catch(console.error);
-  }, []);
+    if (operatorMode) loadLatest();
+    else setLoadState('public');
+  }, [operatorMode]);
 
   const generate = async () => {
     setBusy(true);
     setSendReceipt(null);
+    setError('');
     try {
       const d = await api.generateDigest();
       setDigest(d.digest);
+    } catch {
+      setError('The digest could not be generated. Check that ranked discoveries are available, then retry.');
     } finally {
       setBusy(false);
     }
   };
 
   const send = async () => {
-    const d = await api.sendDigest();
-    setSendReceipt(d.receipt);
+    setError('');
+    try {
+      const d = await api.sendDigest();
+      setSendReceipt(d.receipt);
+    } catch {
+      setError('The preview could not be prepared. Your subscriber list was not contacted.');
+    }
   };
+
+  if (!operatorMode) {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <DigestSignup />
+        <section className="bg-card border border-line rounded-md px-6 py-8">
+          <p className="label-mono text-olive">Subscriber digest</p>
+          <h2 className="font-display text-2xl mt-2">Reviewed signals, delivered directly.</h2>
+          <p className="text-sm text-ink-soft mt-3">
+            Generation, previews, and sends remain restricted to the server-side review workflow.
+          </p>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-2xl mx-auto">
+      <DigestSignup />
       <div className="flex items-end justify-between mb-6">
         <div>
           <h2 className="font-display text-3xl">
             {digest ? `${digest.entries.length} people you should know` : 'The digest'}
           </h2>
           <p className="label-mono mt-1.5">
-            {digest ? digest.generated_at.slice(0, 10) : 'not generated yet'} · every entry has verified contact info
+            {digest ? digest.generated_at.slice(0, 10) : 'not generated yet'} · evidence and available profile links
           </p>
         </div>
         <div className="flex gap-2">
@@ -63,7 +105,26 @@ export default function Digest() {
         </p>
       )}
 
-      {!digest && <p className="text-ink-faint italic">Generate the digest to see this week's discoveries.</p>}
+      {error && (
+        <div role="alert" className="border border-red-300 bg-red-50 rounded-sm px-4 py-3 mb-5">
+          <p className="text-sm text-red-700">{error}</p>
+          {loadState === 'error' && (
+            <button onClick={loadLatest} className="font-mono text-[10px] tracking-widest text-red-700 underline mt-1">
+              TRY AGAIN
+            </button>
+          )}
+        </div>
+      )}
+
+      {loadState === 'loading' && (
+        <p className="text-ink-faint italic">Loading the latest digest…</p>
+      )}
+      {loadState === 'success' && !digest && (
+        <div className="bg-card border border-line rounded-md px-6 py-8 text-center">
+          <p className="font-display text-xl">No digest has been generated yet.</p>
+          <p className="text-sm text-ink-faint mt-1">Generate a preview from the current ranked discoveries.</p>
+        </div>
+      )}
 
       {digest?.entries.map((entry, i) => (
         <div key={entry.person_id} className="bg-card border border-line rounded-md px-7 py-6 mb-4">

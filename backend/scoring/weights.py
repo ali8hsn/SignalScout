@@ -37,6 +37,11 @@ WEIGHTS: dict[str, float] = {
     "debate_nationals": 4.0,
     # connection (derived from graph_edges, weight 3 per plan)
     "connected_to_seeds": 3.0,
+    # licensed enrichment (Phase 1) — discovery cohort only, never founders,
+    # so the backtest's pre-breakout founder scores are untouched.
+    "linkedin_created_recently": 8.0,  # brand-new profile = about to do something
+    "education_signal": 4.0,
+    "job_change": 4.0,
 }
 
 DEFAULT_WEIGHT = 3.0

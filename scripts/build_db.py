@@ -1,8 +1,10 @@
-"""Rebuild the database from scratch:
+"""Initialize or rebuild the database:
 ground truth -> control group -> seeded signals -> discoveries -> edges ->
 entity resolution -> enrichment -> scoring.
 
-Idempotent: drops and recreates everything. Run: python scripts/build_db.py
+Run ``python scripts/build_db.py --if-empty`` for hosted startup: it creates the
+seed set only when no people exist and never replaces migrated discoveries.
+The legacy no-flag command remains an explicit destructive local rebuild.
 """
 
 import argparse
@@ -150,11 +152,29 @@ def main() -> None:
         help="Also load the 12 fictional demo discovery profiles (tagged cohort='demo'). "
              "Off by default so only real, live-scraped discoveries appear.",
     )
+    parser.add_argument(
+        "--if-empty",
+        action="store_true",
+        help="initialize only when the persons table is empty; never reset existing data",
+    )
     args = parser.parse_args()
 
     container = Container()
-    print(f"Building {container.settings.db_path} ...")
-    container.db.reset()
+    container.db.init_schema()
+    existing_people = container.db.conn.execute(
+        "SELECT COUNT(*) AS count FROM persons"
+    ).fetchone()["count"]
+    if args.if_empty and existing_people:
+        print(
+            f"Database already contains {existing_people} people; "
+            "leaving all existing and migrated data unchanged."
+        )
+        container.db.close()
+        return
+    backend = container.db.backend
+    print(f"Building seed set in {backend} database ...")
+    if not args.if_empty:
+        container.db.reset()
     load_ground_truth(container)
     load_controls(container)
     if args.with_demo:
@@ -171,6 +191,7 @@ def main() -> None:
     concentrations = container.concentration_detector.compute(flagged)
     print(f"  {len(concentrations)} concentrations detected")
     print("Done.")
+    container.db.close()
 
 
 if __name__ == "__main__":

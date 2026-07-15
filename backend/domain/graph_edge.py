@@ -6,7 +6,12 @@ from dataclasses import dataclass, field
 EDGE_TYPES = (
     "github_follows",
     "mutual_star",
+    "starred_repo",
+    "forked_repo",
+    "issue_pr_interaction",
     "co_author",
+    "co_contributor",
+    "org_mate",
     "hackathon_teammate",
     "fellowship_cohort",
     "twitter_follows",
@@ -17,8 +22,14 @@ EDGE_QUALITY: dict[str, float] = {
     "co_author": 1.0,
     "hackathon_teammate": 0.9,
     "fellowship_cohort": 0.8,
+    "co_contributor": 0.7,  # a working relationship beats a follow
+    "issue_pr_interaction": 0.65,
     "mutual_star": 0.6,
+    "forked_repo": 0.55,
+    "org_mate": 0.55,  # shared org: weaker than shipping code together, above a follow
     "github_follows": 0.5,
+    # A one-way star is attention, not a proven reciprocal relationship.
+    "starred_repo": 0.45,
     "twitter_follows": 0.4,
 }
 

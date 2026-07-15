@@ -1,20 +1,173 @@
 """API routes (spec §16). Thin: every handler delegates to a service from the Container."""
 
+import hmac
+import html
+import re
+import time
+from collections import defaultdict, deque
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
 from backend.container import Container
+from backend.digest.sender import EmailMessage, NoopSender
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class SubscriberSignup(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    frequency: str = "daily"
+    signal_interests: str = Field(default="", max_length=1000)
+    seed_accounts: str = Field(default="", max_length=4000)
+
+
+class TestDigestRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+
+
+class PageViewEvent(BaseModel):
+    path: str = Field(min_length=1, max_length=200)
+    referrer: str | None = Field(default=None, max_length=500)
+
+
+class CandidateReviewRequest(BaseModel):
+    state: str
+    why_now: str = Field(default="", max_length=2000)
+    notes: str = Field(default="", max_length=4000)
+    source_bucket: str = Field(default="", max_length=100)
+    contactable: bool = False
+    primary_evidence_url: str = Field(default="", max_length=2000)
+    reviewer: str = Field(default="", max_length=200)
 
 
 def build_router(container: Container) -> APIRouter:
     router = APIRouter(prefix="/api")
+    attempts: dict[str, deque[float]] = defaultdict(deque)
+
+    def rate_limit(request: Request, key: str, limit: int, window: int) -> None:
+        now = time.monotonic()
+        identity = request.client.host if request.client else "unknown"
+        bucket = attempts[f"{key}:{identity}"]
+        while bucket and bucket[0] <= now - window:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            raise HTTPException(status_code=429, detail="Too many requests. Try again later.")
+        bucket.append(now)
+
+    @router.get("/health")
+    def health():
+        container.db.conn.execute("SELECT 1").fetchone()
+        return {"status": "ok", "db": container.db.backend}
+
+    @router.post("/subscribers")
+    def subscribe(payload: SubscriberSignup, request: Request):
+        rate_limit(request, "subscribe", 10, 60 * 60)
+        email = payload.email.strip().lower()
+        if not EMAIL_RE.fullmatch(email):
+            raise HTTPException(status_code=422, detail="Enter a valid email address.")
+        if payload.frequency not in {"daily", "weekly"}:
+            raise HTTPException(status_code=422, detail="Frequency must be daily or weekly.")
+        seed_accounts = [
+            account.strip()
+            for account in payload.seed_accounts.split(",")
+            if account.strip()
+        ]
+        subscriber = container.subscribers.subscribe(
+            email,
+            payload.frequency,
+            {
+                "signal_interests": payload.signal_interests.strip(),
+                "seed_accounts": seed_accounts,
+            },
+        )
+        return {
+            "subscribed": True,
+            "email": subscriber.email,
+            "frequency": subscriber.frequency,
+            "message": f"You're signed up for the {subscriber.frequency} Signal Scout digest.",
+        }
+
+    @router.post("/digest/test")
+    def send_test_digest(
+        payload: TestDigestRequest,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ):
+        _require_admin_secret(container, authorization)
+        rate_limit(request, "test-digest", 3, 24 * 60 * 60)
+        email = payload.email.strip().lower()
+        subscriber = container.subscribers.get_by_email(email)
+        if not EMAIL_RE.fullmatch(email) or not subscriber or not subscriber.active:
+            raise HTTPException(
+                status_code=401,
+                detail="That active subscriber is not available.",
+            )
+        configured_owner = container.settings.owner_test_email.strip().lower()
+        if container.settings.is_production and (
+            not configured_owner or not hmac.compare_digest(email, configured_owner)
+        ):
+            raise HTTPException(status_code=403, detail="Test delivery is restricted to the owner.")
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        if container.digest_sends.sent_since(subscriber.id, cutoff):
+            raise HTTPException(
+                status_code=429,
+                detail="A test digest was already sent recently. Please try again after 24 hours.",
+            )
+
+        result = container.subscriber_digest.deliver(subscriber, dry_run=False)
+        if result["status"] == "sent":
+            return {
+                "sent": True,
+                "email": subscriber.email,
+                "candidate_count": result["candidate_count"],
+                "message": "Your test digest is on its way.",
+            }
+        if result["status"] == "preview":
+            raise HTTPException(
+                status_code=503,
+                detail="Email delivery isn't configured yet.",
+            )
+        if result["status"] == "empty":
+            raise HTTPException(
+                status_code=409,
+                detail="There are no new candidates available for your test digest yet.",
+            )
+        raise HTTPException(
+            status_code=502,
+            detail="We couldn't send your test digest right now. Please try again later.",
+        )
+
+    @router.post("/analytics/page-view", status_code=202)
+    def record_page_view(payload: PageViewEvent, request: Request):
+        rate_limit(request, "page-view", 120, 60)
+        path = payload.path.strip()
+        if not path.startswith("/") or "://" in path:
+            raise HTTPException(status_code=422, detail="Page path must be relative to this site.")
+        referrer = payload.referrer.strip() if payload.referrer else None
+        container.page_views.record(path, referrer or None)
+        return {"accepted": True}
 
     @router.get("/overview")
     def overview():
         backtest = container.backtest.run()
         discoveries = container.candidate_service.list_candidates("discovery")
+        if container.settings.is_production:
+            discoveries = [
+                discovery
+                for discovery in discoveries
+                if discovery.get("approval_state") == "approved"
+            ]
         flagged = [d for d in discoveries if d["flagged"]]
+        provider_discoveries = [
+            discovery
+            for discovery in discoveries
+            if discovery["discovery_origin"] == "provider_search"
+        ]
         return {
             "backtest_recall_pct": backtest["recall_pct"],
             "backtest_avg_lead_months": backtest["avg_lead_months"],
@@ -25,18 +178,34 @@ def build_router(container: Container) -> APIRouter:
             "discoveries_flagged": len(flagged),
             "threshold": container.settings.flag_threshold,
             "concentrations": len(container.concentrations.all()),
+            "source_mix": _candidate_source_mix(discoveries),
+            "provider_discoveries_total": len(provider_discoveries),
+            "provider_verified_total": sum(
+                discovery["evidence_tier"] == "verified"
+                for discovery in provider_discoveries
+            ),
+            "provider_review_total": sum(
+                discovery["review_required"]
+                for discovery in provider_discoveries
+            ),
         }
 
     @router.get("/candidates")
     def candidates(cohort: str = "discovery"):
         cohort_arg = None if cohort == "all" else cohort
-        return {"candidates": container.candidate_service.list_candidates(cohort_arg)}
+        rows = container.candidate_service.list_candidates(cohort_arg)
+        if container.settings.is_production and cohort == "discovery":
+            rows = [row for row in rows if row.get("approval_state") == "approved"]
+        return {"candidates": rows}
 
     @router.get("/candidates/{person_id}")
     def candidate(person_id: str):
         profile = container.candidate_service.profile(person_id)
-        if not profile:
-            raise HTTPException(status_code=404, detail="person not found")
+        if not profile or (
+            container.settings.is_production
+            and profile.get("approval_state") != "approved"
+        ):
+            raise HTTPException(status_code=404, detail="That candidate is no longer available.")
         return profile
 
     @router.get("/backtest")
@@ -48,19 +217,26 @@ def build_router(container: Container) -> APIRouter:
         return {"concentrations": [asdict(c) for c in container.concentrations.all()]}
 
     @router.get("/digests/latest")
-    def latest_digest():
+    def latest_digest(authorization: str | None = Header(default=None)):
+        _require_admin_secret(container, authorization)
         digest = container.digests.latest()
         if not digest:
             return {"digest": None}
         return {"digest": _digest_dict(digest)}
 
     @router.post("/digests/generate")
-    def generate_digest():
+    def generate_digest(authorization: str | None = Header(default=None)):
+        _require_admin_secret(container, authorization)
         digest = container.digest_generator.generate()
         return {"digest": _digest_dict(digest)}
 
     @router.post("/discovery/run")
-    def run_discovery():
+    def run_discovery(
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ):
+        _require_admin_secret(container, authorization)
+        rate_limit(request, "discovery", 2, 60 * 60)
         try:
             job_id = container.discovery_job.start()
         except RuntimeError as exc:  # already running
@@ -70,16 +246,152 @@ def build_router(container: Container) -> APIRouter:
         return {"job_id": job_id, "status": container.discovery_job.status()}
 
     @router.get("/discovery/status")
-    def discovery_status():
+    def discovery_status(authorization: str | None = Header(default=None)):
+        _require_admin_secret(container, authorization)
         return container.discovery_job.status()
 
     @router.post("/digests/send")
-    def send_digest():
+    def send_digest(authorization: str | None = Header(default=None)):
+        _require_admin_secret(container, authorization)
         digest = container.digests.latest()
         if not digest:
             raise HTTPException(status_code=400, detail="generate a digest first")
-        receipt = container.email_sender.send(digest, to="cory@example.com")
+        receipt = NoopSender().send(
+            EmailMessage(
+                subject=digest.subject,
+                html=digest.html,
+                text="\n".join([digest.subject, *[entry.name for entry in digest.entries]]),
+            ),
+            to="preview@local.invalid",
+        )
         return {"receipt": receipt, "digest": _digest_dict(digest)}
+
+    @router.get("/digest/preview")
+    def preview_digest(
+        email: str = Query(default=""),
+        authorization: str | None = Header(default=None),
+    ):
+        _require_admin_secret(container, authorization)
+        target_email = email.strip().lower() or container.settings.owner_test_email.strip().lower()
+        if not target_email:
+            raise HTTPException(
+                status_code=422,
+                detail="Choose an existing subscriber email for the exact preview.",
+            )
+        subscriber = container.subscribers.get_by_email(target_email)
+        if not subscriber or not subscriber.active:
+            raise HTTPException(status_code=404, detail="Active subscriber not found.")
+        return container.subscriber_digest.preview(subscriber)
+
+    @router.get("/candidate-reviews")
+    def candidate_reviews(
+        state: str | None = Query(default=None),
+        authorization: str | None = Header(default=None),
+    ):
+        _require_admin_secret(container, authorization)
+        return {
+            "reviews": container.candidate_review_service.list_rows(state),
+            "source_mix": container.candidate_review_service.approved_mix(),
+        }
+
+    @router.put("/candidate-reviews/{person_id}")
+    def review_candidate(
+        person_id: str,
+        payload: CandidateReviewRequest,
+        authorization: str | None = Header(default=None),
+    ):
+        _require_admin_secret(container, authorization)
+        try:
+            review = container.candidate_review_service.review(
+                person_id=person_id,
+                state=payload.state,
+                why_now=payload.why_now,
+                notes=payload.notes,
+                source_bucket=payload.source_bucket,
+                contactable=payload.contactable,
+                primary_evidence_url=payload.primary_evidence_url,
+                reviewer=payload.reviewer,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return review.__dict__
+
+    @router.post("/digest/cron")
+    def run_digest_cron(
+        dry_run: bool = Query(default=False),
+        recipient: str | None = Query(default=None),
+        authorization: str | None = Header(default=None),
+    ):
+        _require_cron_secret(container, authorization)
+        if recipient and not EMAIL_RE.fullmatch(recipient.strip().lower()):
+            raise HTTPException(status_code=422, detail="Recipient must be a valid email address.")
+        return container.subscriber_digest.run_due(
+            dry_run=dry_run,
+            recipient=recipient.strip().lower() if recipient else None,
+        )
+
+    @router.get("/digest/feedback", response_class=HTMLResponse)
+    def digest_feedback(token: str, person_id: str, vote: str):
+        if vote not in {"up", "down"}:
+            return _confirmation_page("That feedback link is not valid.", success=False)
+        subscriber_id = container.email_action_signer.verify(
+            token, "feedback", person_id, vote
+        )
+        subscriber = container.subscribers.get(subscriber_id) if subscriber_id else None
+        if not subscriber or not subscriber.active:
+            return _confirmation_page("This feedback link has expired.", success=False)
+        person = container.persons.get(person_id)
+        if not person:
+            return _confirmation_page("That candidate is no longer available.", success=False)
+        label = "useful" if vote == "up" else "not a fit"
+        return _action_confirmation_page(
+            f"Mark {person.name} as {label}?",
+            f"/api/digest/feedback?token={token}&person_id={person_id}&vote={vote}",
+            "Save feedback",
+        )
+
+    @router.post("/digest/feedback", response_class=HTMLResponse)
+    def save_digest_feedback(token: str, person_id: str, vote: str):
+        if vote not in {"up", "down"}:
+            return _confirmation_page("That feedback link is not valid.", success=False)
+        subscriber_id = container.email_action_signer.verify(
+            token, "feedback", person_id, vote
+        )
+        subscriber = container.subscribers.get(subscriber_id) if subscriber_id else None
+        person = container.persons.get(person_id)
+        if not subscriber or not subscriber.active or not person:
+            return _confirmation_page("This feedback link has expired.", success=False)
+        container.feedback.upsert(subscriber.id, person_id, vote)
+        label = "useful" if vote == "up" else "not a fit"
+        return _confirmation_page(f"Thanks — you marked {person.name} as {label}.")
+
+    @router.get("/digest/unsubscribe", response_class=HTMLResponse)
+    def digest_unsubscribe(token: str):
+        subscriber_id = container.email_action_signer.verify(token, "unsubscribe")
+        subscriber = container.subscribers.get(subscriber_id) if subscriber_id else None
+        if not subscriber:
+            return _confirmation_page("This unsubscribe link is not valid.", success=False)
+        if not subscriber.active:
+            return _confirmation_page(f"{subscriber.email} is already unsubscribed.")
+        return _action_confirmation_page(
+            f"Unsubscribe {subscriber.email} from Signal Scout?",
+            f"/api/digest/unsubscribe?token={token}",
+            "Unsubscribe",
+        )
+
+    @router.post("/digest/unsubscribe", response_class=HTMLResponse)
+    def confirm_digest_unsubscribe(token: str):
+        subscriber_id = container.email_action_signer.verify(token, "unsubscribe")
+        subscriber = container.subscribers.get(subscriber_id) if subscriber_id else None
+        if not subscriber:
+            return _confirmation_page("This unsubscribe link is not valid.", success=False)
+        changed = container.subscribers.deactivate(subscriber.unsubscribe_token)
+        message = (
+            f"{subscriber.email} has been unsubscribed."
+            if changed
+            else f"{subscriber.email} is already unsubscribed."
+        )
+        return _confirmation_page(message)
 
     return router
 
@@ -92,3 +404,65 @@ def _digest_dict(digest) -> dict:
         "entries": [asdict(e) for e in digest.entries],
         "html": digest.html,
     }
+
+
+def _candidate_source_mix(candidates: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        for source, count in candidate.get("source_counts", {}).items():
+            counts[source] = counts.get(source, 0) + int(count)
+    return dict(sorted(counts.items(), key=lambda item: -item[1]))
+
+
+def _require_cron_secret(container: Container, authorization: str | None) -> None:
+    configured = container.settings.cron_secret
+    if not configured:
+        raise HTTPException(status_code=503, detail="Digest scheduling is not configured.")
+    supplied = ""
+    if authorization and authorization.startswith("Bearer "):
+        supplied = authorization.removeprefix("Bearer ").strip()
+    if not supplied or not hmac.compare_digest(supplied, configured):
+        raise HTTPException(status_code=401, detail="Invalid cron authorization.")
+
+
+def _require_admin_secret(container: Container, authorization: str | None) -> None:
+    configured = container.settings.admin_secret or container.settings.cron_secret
+    if not configured:
+        raise HTTPException(status_code=503, detail="Operator access is not configured.")
+    supplied = ""
+    if authorization and authorization.startswith("Bearer "):
+        supplied = authorization.removeprefix("Bearer ").strip()
+    if not supplied or not hmac.compare_digest(supplied, configured):
+        raise HTTPException(status_code=401, detail="Invalid operator authorization.")
+
+
+def _confirmation_page(message: str, success: bool = True) -> HTMLResponse:
+    title = "All set" if success else "Link unavailable"
+    safe_message = html.escape(message)
+    return HTMLResponse(
+        content=f"""<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<title>{title} · Signal Scout</title></head>
+<body style="margin:0;background:#f5f3ec;color:#1c1b16;font-family:Georgia,serif">
+<main style="max-width:520px;margin:12vh auto;padding:28px">
+<p style="color:#60652b;font:12px ui-monospace,monospace;text-transform:uppercase">Signal Scout</p>
+<h1>{title}</h1><p style="font-size:18px;line-height:1.5">{safe_message}</p>
+</main></body></html>""",
+        status_code=200 if success else 400,
+    )
+
+
+def _action_confirmation_page(message: str, action: str, button: str) -> HTMLResponse:
+    safe_message = html.escape(message)
+    safe_action = html.escape(action, quote=True)
+    safe_button = html.escape(button)
+    return HTMLResponse(
+        content=f"""<!doctype html><html><head><meta name="viewport" content="width=device-width">
+<title>Confirm · Signal Scout</title></head>
+<body style="margin:0;background:#f5f3ec;color:#1c1b16;font-family:Georgia,serif">
+<main style="max-width:520px;margin:12vh auto;padding:28px">
+<p style="color:#60652b;font:12px ui-monospace,monospace;text-transform:uppercase">Signal Scout</p>
+<h1>Confirm action</h1><p style="font-size:18px;line-height:1.5">{safe_message}</p>
+<form method="post" action="{safe_action}">
+<button type="submit" style="background:#60652b;color:#fff;border:0;padding:11px 18px">{safe_button}</button>
+</form></main></body></html>"""
+    )

@@ -92,10 +92,36 @@ class GithubClient:
         return self._get(f"/users/{username}/social_accounts") or []
 
     def following(self, username: str, limit: int = 100) -> list[dict]:
-        return self._get(f"/users/{username}/following", {"per_page": limit}) or []
+        return (self._get(f"/users/{username}/following", {"per_page": limit}) or [])[:limit]
 
     def followers(self, username: str, limit: int = 100) -> list[dict]:
-        return self._get(f"/users/{username}/followers", {"per_page": limit}) or []
+        return (self._get(f"/users/{username}/followers", {"per_page": limit}) or [])[:limit]
+
+    def repo_contributors(self, owner: str, repo: str, limit: int = 30) -> list[dict]:
+        return (self._get(f"/repos/{owner}/{repo}/contributors", {"per_page": limit}) or [])[:limit]
+
+    def repo_stargazers(self, owner: str, repo: str, limit: int = 20) -> list[dict]:
+        """Users who starred a repo. This proves a one-way star, not mutuality."""
+        return (self._get(f"/repos/{owner}/{repo}/stargazers", {"per_page": limit}) or [])[:limit]
+
+    def repo_forkers(self, owner: str, repo: str, limit: int = 15) -> list[dict]:
+        return (self._get(f"/repos/{owner}/{repo}/forks", {"per_page": limit}) or [])[:limit]
+
+    def repo_issues(self, owner: str, repo: str, limit: int = 20) -> list[dict]:
+        """Issue creators and PR authors; GitHub's issues endpoint includes PRs."""
+        return (
+            self._get(
+                f"/repos/{owner}/{repo}/issues",
+                {"state": "all", "sort": "updated", "direction": "desc", "per_page": limit},
+            )
+            or []
+        )[:limit]
+
+    def org_members(self, org: str, limit: int = 30) -> list[dict]:
+        return (self._get(f"/orgs/{org}/members", {"per_page": limit}) or [])[:limit]
+
+    def user_orgs(self, username: str) -> list[dict]:
+        return self._get(f"/users/{username}/orgs") or []
 
 
 class GithubScraper(BaseScraper):

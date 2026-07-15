@@ -2,18 +2,41 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import ContactLinks from './ContactLinks.jsx';
 import SignalTimeline from './SignalTimeline.jsx';
+import { sourceLabel } from './SignalBadge.jsx';
 
 export default function EvidencePanel({ personId, onClose }) {
   const [profile, setProfile] = useState(null);
+  const [state, setState] = useState('loading');
 
-  useEffect(() => {
-    api.candidate(personId).then(setProfile).catch(console.error);
-  }, [personId]);
+  const load = () => {
+    setState('loading');
+    api.candidate(personId)
+      .then((result) => {
+        setProfile(result);
+        setState('success');
+      })
+      .catch(() => setState('error'));
+  };
 
-  if (!profile) {
+  useEffect(load, [personId]);
+
+  if (state !== 'success' || !profile) {
     return (
       <div className="fixed inset-0 bg-ink/30 z-20 flex items-center justify-center">
-        <p className="font-mono text-xs text-cream">loading evidence…</p>
+        <div className="bg-cream border border-line rounded-md max-w-sm mx-4 px-6 py-6 text-center">
+          {state === 'loading' ? (
+            <p className="font-mono text-xs text-ink-faint">Loading the evidence receipt…</p>
+          ) : (
+            <>
+              <p className="font-display text-xl">Evidence is temporarily unavailable.</p>
+              <p className="text-sm text-ink-faint mt-1">The candidate has not been removed.</p>
+              <div className="flex justify-center gap-4 mt-4">
+                <button onClick={load} className="font-mono text-[10px] text-olive underline">TRY AGAIN</button>
+                <button onClick={onClose} className="font-mono text-[10px] text-ink-faint">CLOSE</button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     );
   }
@@ -36,6 +59,20 @@ export default function EvidencePanel({ personId, onClose }) {
         </div>
 
         <ContactLinks links={profile.contact_links} className="mt-3" />
+
+        {profile.source_counts && Object.keys(profile.source_counts).length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 mt-4">
+            <span className="label-mono text-ink-faint mr-1">evidence sources</span>
+            {Object.entries(profile.source_counts).map(([source, count]) => (
+              <span
+                key={source}
+                className="font-mono text-[10px] uppercase tracking-wider text-ink-soft border border-line rounded-sm px-2 py-0.5"
+              >
+                {sourceLabel(source)} · {count}
+              </span>
+            ))}
+          </div>
+        )}
 
         <h3 className="label-mono mt-8 mb-3">score receipt — {Math.round(profile.score)} / 100</h3>
         <div className="bg-card border border-line rounded-md overflow-hidden">

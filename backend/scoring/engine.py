@@ -37,6 +37,7 @@ class ScoringEngine:
         best edge type (a co-authorship beats a follow).
         """
         seeds_touched: dict[str, float] = {}
+        surfaces_by_seed: dict[str, set[str]] = {}
         latest = None
         for edge in edges:
             if self._parse(edge.observed_date) > as_of:
@@ -49,18 +50,29 @@ class ScoringEngine:
             if other is None:
                 continue
             quality = EDGE_QUALITY.get(edge.edge_type, 0.5)
+            if edge.metadata.get("repeat", 0) >= 2 and edge.edge_type in (
+                "co_author",
+                "hackathon_teammate",
+            ):
+                quality = 1.0
             # A founder *choosing to follow* someone is a stronger warm signal
             # than a stranger following the founder.
             if edge.edge_type == "github_follows" and edge.metadata.get("direction") == "seed_follows":
                 quality = 0.75
             seeds_touched[other] = max(seeds_touched.get(other, 0.0), quality)
+            surfaces_by_seed.setdefault(other, set()).add(edge.edge_type)
             if latest is None or edge.observed_date > latest:
                 latest = edge.observed_date
         if not seeds_touched:
             return None
         count = len(seeds_touched)
         best_quality = max(seeds_touched.values())
-        strength = min(1.0, (0.3 + 0.15 * count) * best_quality + 0.1)
+        # Compound independent relationship surfaces for live discoveries only.
+        # Founder backtest calibration remains byte-for-byte on the legacy term.
+        extra_surfaces = sum(max(0, len(types) - 1) for types in surfaces_by_seed.values())
+        surface_bonus = min(0.25, 0.1 * extra_surfaces) if person.cohort == "discovery" else 0.0
+        strength = min(1.0, (0.3 + 0.15 * count) * best_quality + 0.1 + surface_bonus)
+        distinct_surfaces = sorted({surface for types in surfaces_by_seed.values() for surface in types})
         return Signal(
             person_name=person.name,
             signal_type="connected_to_seeds",
@@ -68,8 +80,17 @@ class ScoringEngine:
             signal_date=latest or as_of.isoformat(),
             signal_strength=round(strength, 3),
             source="graph",
-            summary=f"Connected to {count} seed founder{'s' if count != 1 else ''} (best edge quality {best_quality:.1f})",
-            metadata={"seed_count": count, "best_quality": best_quality},
+            summary=(
+                f"Connected to {count} seed founder{'s' if count != 1 else ''} "
+                f"across {len(distinct_surfaces)} surface{'s' if len(distinct_surfaces) != 1 else ''} "
+                f"(best edge quality {best_quality:.1f})"
+            ),
+            metadata={
+                "seed_count": count,
+                "best_quality": best_quality,
+                "distinct_surfaces": distinct_surfaces,
+                "surface_bonus": round(surface_bonus, 3),
+            },
         )
 
     def compute(self, person: Person, signals: list[Signal], as_of: date) -> ScoreBreakdown:
