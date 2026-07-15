@@ -63,16 +63,18 @@ export default function DigestSignup() {
   }
 
   return (
-    <section className="bg-card border border-olive/60 rounded-md px-6 py-5 mb-8">
-      <div className="mb-4">
-        <p className="font-mono text-[10px] tracking-widest uppercase text-olive">Signal Scout digest</p>
-        <h2 className="font-display text-2xl mt-1">Meet exceptional people before breakout.</h2>
-        <p className="text-sm text-ink-soft mt-1">
-          Get evidence-backed candidates with exact signals and direct profile links.
+    <section className="bg-card border border-olive/60 rounded-md px-5 sm:px-6 py-5 mb-8">
+      <div className="mb-4 sm:flex sm:items-end sm:justify-between sm:gap-6">
+        <div>
+          <p className="font-mono text-[10px] tracking-widest uppercase text-olive">Signal Scout digest</p>
+          <h2 className="font-display text-2xl mt-1">Meet exceptional people before breakout.</h2>
+        </div>
+        <p className="text-sm text-ink-soft mt-1 sm:max-w-xs">
+          Exact signals and direct profile links, delivered.
         </p>
       </div>
       <form onSubmit={submit} className="grid gap-3">
-        <div className="grid sm:grid-cols-[1fr_150px] gap-3">
+        <div className="grid sm:grid-cols-[1fr_140px_auto] gap-3 items-end">
           <label>
             <span className="label-mono block mb-1">Email</span>
             <input
@@ -97,39 +99,44 @@ export default function DigestSignup() {
               <option value="weekly">Weekly</option>
             </select>
           </label>
-        </div>
-        <label>
-          <span className="label-mono block mb-1">Signals you care about · optional</span>
-          <input
-            value={form.signalInterests}
-            onChange={update('signalInterests')}
-            placeholder="AI research, open source traction, hackathon wins"
-            disabled={status === 'loading'}
-            className="w-full bg-cream border border-line rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-olive"
-          />
-        </label>
-        <label>
-          <span className="label-mono block mb-1">Seed accounts · optional, comma-separated</span>
-          <input
-            value={form.seedAccounts}
-            onChange={update('seedAccounts')}
-            placeholder="https://x.com/example, https://linkedin.com/in/example"
-            disabled={status === 'loading'}
-            className="w-full bg-cream border border-line rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-olive"
-          />
-        </label>
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <button
             type="submit"
             disabled={status === 'loading'}
-            className="bg-olive hover:bg-olive-dark disabled:bg-ink-faint text-cream font-mono text-[10px] tracking-widest px-5 py-2.5 rounded-sm"
+            className="bg-olive hover:bg-olive-dark disabled:bg-ink-faint text-cream font-mono text-[10px] tracking-widest px-5 py-2.5 rounded-sm h-[38px]"
           >
             {status === 'loading' ? 'SIGNING UP…' : 'JOIN THE DIGEST'}
           </button>
-          {status === 'error' && (
-            <p role="alert" className="font-mono text-[11px] text-red-600">{message}</p>
-          )}
         </div>
+        <details className="group">
+          <summary className="font-mono text-[10px] tracking-widest text-olive cursor-pointer">
+            PERSONALIZE SIGNALS AND SEED ACCOUNTS
+          </summary>
+          <div className="grid sm:grid-cols-2 gap-3 mt-3">
+            <label>
+              <span className="label-mono block mb-1">Signals you care about · optional</span>
+              <input
+                value={form.signalInterests}
+                onChange={update('signalInterests')}
+                placeholder="AI research, open source traction"
+                disabled={status === 'loading'}
+                className="w-full bg-cream border border-line rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-olive"
+              />
+            </label>
+            <label>
+              <span className="label-mono block mb-1">Seed accounts · optional</span>
+              <input
+                value={form.seedAccounts}
+                onChange={update('seedAccounts')}
+                placeholder="GitHub, X, or provider profile URLs"
+                disabled={status === 'loading'}
+                className="w-full bg-cream border border-line rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-olive"
+              />
+            </label>
+          </div>
+        </details>
+        {status === 'error' && (
+          <p role="alert" className="font-mono text-[11px] text-red-600">{message}</p>
+        )}
       </form>
     </section>
   );

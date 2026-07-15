@@ -85,7 +85,9 @@ export default function PipelineProgress({ status }) {
       </div>
 
       {status.error && (
-        <p className="font-mono text-[11px] text-red-500 mt-5 text-center">{status.error}</p>
+        <p className="text-sm text-red-700 mt-5 text-center">
+          Discovery stopped before completing. Your existing candidates were not removed.
+        </p>
       )}
     </div>
   );

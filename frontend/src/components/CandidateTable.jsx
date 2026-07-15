@@ -1,15 +1,5 @@
 import { useMemo, useState } from 'react';
-
-const COLUMNS = [
-  { key: 'score', label: 'Score' },
-  { key: 'name', label: 'Name' },
-  { key: 'school', label: 'School' },
-  { key: 'area', label: 'Area' },
-  { key: 'region', label: 'Location' },
-  { key: 'github_followers', label: 'Followers' },
-  { key: 'connection_count', label: 'Connections' },
-  { key: 'signal_count', label: 'Signals' },
-];
+import SignalBadge from './SignalBadge.jsx';
 
 const UNKNOWN_FOLLOWER_CAP = 1000;
 
@@ -50,7 +40,7 @@ export default function CandidateTable({ candidates, onSelect, highlightIds }) {
 
   return (
     <div>
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
         <span className="label-mono">area</span>
         <select
           value={areaFilter}
@@ -70,50 +60,67 @@ export default function CandidateTable({ candidates, onSelect, highlightIds }) {
         </label>
         <span className="label-mono ml-auto">{rows.length} candidates</span>
       </div>
-      <div className="bg-card border border-line rounded-md overflow-hidden">
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="border-b border-line">
-              {COLUMNS.map((col) => (
-                <th
-                  key={col.key}
-                  onClick={() => toggleSort(col.key)}
-                  className="text-left px-4 py-2.5 label-mono cursor-pointer select-none hover:text-olive"
+      <div className="flex items-center justify-end gap-2 mb-3">
+        <span className="label-mono">rank by</span>
+        <button onClick={() => toggleSort('score')} className="font-mono text-[10px] text-olive underline">
+          SCORE {sortKey === 'score' ? (sortDesc ? '↓' : '↑') : ''}
+        </button>
+        <button onClick={() => toggleSort('name')} className="font-mono text-[10px] text-ink-faint hover:text-olive">
+          NAME {sortKey === 'name' ? (sortDesc ? '↓' : '↑') : ''}
+        </button>
+      </div>
+      <div className="space-y-3">
+        {rows.map((c, position) => (
+          <article
+            key={c.id}
+            className={`bg-card border rounded-md px-5 sm:px-6 py-5 ${
+              highlight.has(c.id) ? 'border-olive bg-olive/10' : 'border-line'
+            }`}
+          >
+            <div className="flex items-start gap-4">
+              <span className="font-mono text-sm text-olive mt-1">
+                #{String(position + 1).padStart(3, '0')}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h2 className="font-display text-2xl">
+                      {c.name}
+                      {highlight.has(c.id) && (
+                        <span className="ml-2 font-mono text-[9px] tracking-widest text-olive align-middle">NEW</span>
+                      )}
+                    </h2>
+                    <p className="text-xs text-ink-faint mt-1">
+                      {[c.school, c.area, c.region || c.current_location].filter(Boolean).join(' · ') || 'Public profile signals'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-mono text-2xl text-olive">{Math.round(c.score)}</p>
+                    <p className="label-mono">{c.signal_count} signals</p>
+                  </div>
+                </div>
+                {c.thesis && <p className="text-sm text-ink-soft mt-3 italic">{c.thesis}</p>}
+                <div className="flex flex-wrap gap-2 mt-4" aria-label={`Top signals for ${c.name}`}>
+                  {(c.top_signals || []).map((signal, index) => (
+                    <SignalBadge key={`${signal.type}-${index}`} signal={signal} />
+                  ))}
+                </div>
+                {c.connection_context && (
+                  <p className="text-xs text-ink-soft mt-3">
+                    <span className="label-mono text-olive mr-2">orbit</span>
+                    {c.connection_context}
+                  </p>
+                )}
+                <button
+                  onClick={() => onSelect(c)}
+                  className="font-mono text-[10px] tracking-widest text-olive hover:text-olive-dark mt-4"
                 >
-                  {col.label}
-                  {sortKey === col.key && <span className="ml-1 text-olive">{sortDesc ? '↓' : '↑'}</span>}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr
-                key={c.id}
-                onClick={() => onSelect(c)}
-                className={`border-b border-line-soft last:border-0 hover:bg-cream cursor-pointer ${
-                  highlight.has(c.id) ? 'bg-olive/10' : ''
-                }`}
-              >
-                <td className="px-4 py-2.5 font-mono text-olive">{Math.round(c.score)}</td>
-                <td className="px-4 py-2.5 font-display text-[15px]">
-                  {c.name}
-                  {highlight.has(c.id) && (
-                    <span className="ml-2 font-mono text-[9px] tracking-widest text-olive align-middle">NEW</span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5 text-ink-soft">{c.school || '—'}</td>
-                <td className="px-4 py-2.5 text-ink-soft">{c.area || '—'}</td>
-                <td className="px-4 py-2.5 text-ink-soft">{c.region || c.current_location || '—'}</td>
-                <td className="px-4 py-2.5 font-mono">
-                  {c.github_followers == null ? '—' : c.github_followers.toLocaleString()}
-                </td>
-                <td className="px-4 py-2.5 font-mono">{c.connection_count}</td>
-                <td className="px-4 py-2.5 font-mono">{c.signal_count}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  VIEW FULL EVIDENCE →
+                </button>
+              </div>
+            </div>
+          </article>
+        ))}
       </div>
     </div>
   );

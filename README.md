@@ -1,8 +1,15 @@
 # Signal Scout
 
-Finds exceptional people **before** they break out, by collecting public signals
-(competitions, code, research, hackathons, network), scoring them, and backtesting
-against known founders. The backtest is the pitch; the digest is the demo.
+**Finding exceptional people before the world knows their names.**
+
+Signal Scout collects public signals
+(competitions, code, research, hackathons, network), scores them, and backtests
+against known founders. Hosted v1 adds real discovery runs, licensed contact enrichment,
+Postgres persistence, ranked public results, privacy-minimal page views, and personalized
+Resend digests. It does not scrape LinkedIn.
+
+For the production checklist, migration safety, exact environment variables, key links, Resend
+tracking setup, and the five-minute pre-Cory QA, see [DEPLOY.md](DEPLOY.md).
 
 ## Quick start
 
@@ -26,12 +33,13 @@ GITHUB_TOKEN=... python scripts/run_discovery.py   # one-hop graph expansion fro
 
 ## Layout
 
-- `backend/` — FastAPI + SQLite. Layers: domain dataclasses → repositories → scrapers →
+- `backend/` — FastAPI + Postgres on Railway, with SQLite fallback locally. Layers: domain dataclasses → repositories → scrapers →
   scoring/backtest → discovery/enrichment → digest → API. Wired by `backend/container.py`.
 - `data/` — hand-curated ground truth (30 founders + researcher anchors), seed signal
   fixtures per source, school→location map, seed accounts for graph expansion.
 - `frontend/` — Vite + React + Tailwind. Three tabs: Discover, Backtest, Digest.
-- `scripts/` — `build_db.py`, `run_backtest.py`, `run_scrapers.py`, `run_discovery.py`.
+- `scripts/` — safe empty-DB initialization, SQLite→Postgres migration, backtest, discovery,
+  enrichment, and digest delivery commands.
 - `out/` — generated digest HTML (shareable artifact).
 
 ## How scoring works

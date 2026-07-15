@@ -26,10 +26,10 @@ open http://localhost:8000                # the built frontend
 
 1. Go to [railway.com/new](https://railway.com/new) → click **Deploy from GitHub repo**.
 2. Authorize Railway's GitHub app if prompted, then pick **ali8hsn/signalScout**.
-3. Click **Deploy now**. Railway detects the `Dockerfile` automatically and builds it
-   (like Vercel's build step; watch progress under the service's **Deployments** tab).
-4. The first deploy can build before Postgres exists. The frontend and SQLite health check can
-   load, but data endpoints are not ready until the Postgres variable and migration below finish.
+3. Click **Deploy now**. Railway detects the `Dockerfile` automatically. On each start,
+   `scripts/build_db.py --if-empty` initializes the backtest seed set only if `persons` is empty.
+   It never resets a migrated database or removes real discoveries.
+4. The first deploy can build before Postgres exists. Add Postgres before sharing the URL.
 
 ## 3. Add the Postgres plugin
 
@@ -41,12 +41,9 @@ open http://localhost:8000                # the built frontend
 1. Click your **app service** (not Postgres) → **Variables** tab → **+ New Variable**.
 2. Click **Add Reference**, choose the **Postgres** service, and select `DATABASE_URL`. Confirm the
    app variable is named `DATABASE_URL` and displays `${{Postgres.DATABASE_URL}}`.
-3. Add the rest from `.env.example` as needed:
-   - `GITHUB_TOKEN` — enables the live "Run Discovery" pipeline.
-   - `ENRICHMENT_PROVIDER`, `PDL_API_KEY` / `CORESIGNAL_API_KEY`, `DAILY_ENRICHMENT_BUDGET` — LinkedIn enrichment.
-   - `RESEND_API_KEY`, `DIGEST_FROM_EMAIL`, `PUBLIC_BASE_URL`, `CRON_SECRET` — email digest.
-     Set `PUBLIC_BASE_URL` to the generated Railway origin, for example
-     `https://signalscout-production.up.railway.app` (no trailing slash).
+3. Add the rest from the exact variable checklist at the end of this document.
+   Set `PUBLIC_BASE_URL` to the generated Railway origin, for example
+   `https://signalscout-production.up.railway.app` (no trailing slash).
    - `SIGNAL_SCOUT_DB` is **not** needed on Railway (Postgres is used when `DATABASE_URL` is set).
 4. Click **Deploy** on the banner that appears — variable changes trigger a redeploy.
 
@@ -70,8 +67,10 @@ Preview what would be copied without touching Postgres:
 python scripts/migrate_sqlite_to_postgres.py --dry-run
 ```
 
-The migration is idempotent and transactional: it truncates the destination set, copies every
-discovered SQLite table, verifies each row count, and rolls back if any table fails.
+The migration is transactional: it replaces the destination tables with the complete local
+SQLite dataset, including all real discoveries and graph data, verifies each row count, and
+rolls back if any table fails. Run it only from the canonical `signal_scout.db`. Later app
+restarts see a non-empty database and leave it unchanged.
 
 > If `DATABASE_URL` in the service references the plugin's *private* network URL and the
 > migration can't connect from your laptop, copy the **public** connection string instead:
@@ -98,9 +97,12 @@ with all migrated data, no login.
 ## 8. Configure Resend and the daily digest cron
 
 1. In Resend, verify the domain used by `DIGEST_FROM_EMAIL`, create an API key, and add both
-   values to the app service. Resend controls open tracking at the domain level rather than in
-   the send-email API payload: open the domain's settings and leave **Open tracking** enabled.
-   With either value missing, Signal Scout safely renders previews and records no sends.
+   values to the app service. Signal Scout sends HTML and plain text through Resend's supported
+   Email API; open tracking is not a per-email request field. Resend disables tracking by
+   default: in **Domains → your domain → Tracking**, add a tracking subdomain, publish its CNAME,
+   wait for verification, and explicitly enable **Open tracking**. See
+   [Resend tracking setup](https://resend.com/docs/dashboard/domains/tracking).
+   With either email value missing, Signal Scout safely renders previews and records no sends.
 2. Railway cron jobs execute commands. Project canvas → **+ Create** → **Empty Service**, name it
    `digest-cron`, connect it to the same GitHub repo, and copy the app service variables
    (`DATABASE_URL`, `RESEND_API_KEY`, `DIGEST_FROM_EMAIL`, and `PUBLIC_BASE_URL`).
@@ -137,3 +139,63 @@ For a local command-path preview, run
   build logs' frontend stage. API routes always win because they're mounted before the static files.
 - **Logs** — service → **Deployments** → click the active deployment → **View Logs**
   (equivalent of `vercel logs`).
+
+## Final environment and key checklist
+
+Required for hosted storage and links:
+
+- `DATABASE_URL` — Postgres connection used by every repository. Railway provides it: app
+  **Variables → Add Reference → Postgres → DATABASE_URL**; do not paste it into source control.
+- `PUBLIC_BASE_URL` — generated Railway HTTPS origin used in feedback/unsubscribe links.
+- `CRON_SECRET` — protects the manual cron endpoint. Generate locally with
+  `openssl rand -hex 32`, then store only the output in Railway Variables.
+
+Required for live discovery:
+
+- `GITHUB_TOKEN` — authenticates GitHub public-data API calls and raises rate limits. Create a
+  token at [GitHub token settings](https://github.com/settings/tokens); grant only the minimum
+  read access needed for public repositories and organizations.
+- `DISCOVERY_SEED_LIMIT` — optional number of seed accounts per run; default `4`.
+- `DISCOVERY_MAX_PER_SEED` — optional expansion cap per seed; default `30`.
+
+Choose one licensed enrichment provider:
+
+- `ENRICHMENT_PROVIDER` — either `pdl` or `coresignal`; default `pdl`.
+- `PDL_API_KEY` — People Data Labs person enrichment key. Obtain it from the
+  [PDL dashboard](https://dashboard.peopledatalabs.com/).
+- `CORESIGNAL_API_KEY` — Coresignal employee API key. Obtain access from
+  [Coresignal self-service](https://dashboard.coresignal.com/sign-up).
+- `DAILY_ENRICHMENT_BUDGET` — maximum licensed-provider calls per UTC day; default `100`.
+
+Required for real email delivery:
+
+- `RESEND_API_KEY` — sends subscriber digests. Create it in
+  [Resend API Keys](https://resend.com/api-keys).
+- `DIGEST_FROM_EMAIL` — sender on a verified Resend domain, for example
+  `Signal Scout <digest@example.com>`. Set up the domain in
+  [Resend Domains](https://resend.com/domains).
+
+`SIGNAL_SCOUT_DB` is local-only and must not be set on Railway. Missing provider/email keys
+degrade safely: enrichment skips and email remains preview-only.
+
+## Five-minute pre-Cory QA
+
+1. **0:00–0:30 — service/data:** open `/api/health` and confirm
+   `{"status":"ok","db":"postgres"}`; open `/api/overview` and confirm discovery counts are
+   non-zero and the backtest reads 70.0% recall, 16.9 months lead, and 1.7% false positives.
+2. **0:30–1:30 — Discover:** open the root URL on desktop and a narrow mobile viewport. Confirm
+   the exact line “Finding exceptional people before the world knows their names,” all three
+   tabs, ranked real people, visible signal summaries, and a prominent digest signup card.
+3. **1:30–2:15 — evidence/pipeline:** open one evidence receipt and one profile link. If
+   `GITHUB_TOKEN` is configured, start one real discovery run and confirm live stage progress;
+   otherwise confirm the UI gives the friendly token instruction. Do not wait on a staged demo.
+4. **2:15–3:00 — Backtest:** open Backtest and confirm the headline, four metrics, chart, and
+   founder table render without overflow or raw errors.
+5. **3:00–4:00 — signup/digest:** subscribe a controlled address, reload Digest, generate a
+   preview, then run the documented authenticated `dry_run=true` curl for that address. Confirm
+   exact signal lines and feedback/unsubscribe links; do not run a real send during QA.
+6. **4:00–4:30 — analytics/privacy:** switch through all three tabs, then check Postgres
+   `page_views` rows contain only `id`, `path`, `viewed_at`, and optional `referrer`.
+7. **4:30–5:00 — final checks:** confirm Resend's tracking subdomain is verified and Open
+   tracking is enabled, Railway logs have no current errors, and no secret appears in the
+   public page or repository. Only then copy the Railway URL for Cory.

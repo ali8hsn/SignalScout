@@ -5,15 +5,37 @@ import SignalTimeline from './SignalTimeline.jsx';
 
 export default function EvidencePanel({ personId, onClose }) {
   const [profile, setProfile] = useState(null);
+  const [state, setState] = useState('loading');
 
-  useEffect(() => {
-    api.candidate(personId).then(setProfile).catch(console.error);
-  }, [personId]);
+  const load = () => {
+    setState('loading');
+    api.candidate(personId)
+      .then((result) => {
+        setProfile(result);
+        setState('success');
+      })
+      .catch(() => setState('error'));
+  };
 
-  if (!profile) {
+  useEffect(load, [personId]);
+
+  if (state !== 'success' || !profile) {
     return (
       <div className="fixed inset-0 bg-ink/30 z-20 flex items-center justify-center">
-        <p className="font-mono text-xs text-cream">loading evidence…</p>
+        <div className="bg-cream border border-line rounded-md max-w-sm mx-4 px-6 py-6 text-center">
+          {state === 'loading' ? (
+            <p className="font-mono text-xs text-ink-faint">Loading the evidence receipt…</p>
+          ) : (
+            <>
+              <p className="font-display text-xl">Evidence is temporarily unavailable.</p>
+              <p className="text-sm text-ink-faint mt-1">The candidate has not been removed.</p>
+              <div className="flex justify-center gap-4 mt-4">
+                <button onClick={load} className="font-mono text-[10px] text-olive underline">TRY AGAIN</button>
+                <button onClick={onClose} className="font-mono text-[10px] text-ink-faint">CLOSE</button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     );
   }

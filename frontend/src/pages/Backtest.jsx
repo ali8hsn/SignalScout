@@ -16,12 +16,42 @@ function Metric({ label, value, detail }) {
 export default function Backtest() {
   const [report, setReport] = useState(null);
   const [evidenceId, setEvidenceId] = useState(null);
+  const [state, setState] = useState('loading');
 
-  useEffect(() => {
-    api.backtest().then(setReport).catch(console.error);
-  }, []);
+  const load = () => {
+    setState('loading');
+    api.backtest()
+      .then((result) => {
+        setReport(result);
+        setState('success');
+      })
+      .catch(() => setState('error'));
+  };
 
-  if (!report) return <p className="font-mono text-xs text-ink-faint">running backtest…</p>;
+  useEffect(load, []);
+
+  if (state === 'loading') {
+    return <p className="font-mono text-xs text-ink-faint">Running the historical backtest…</p>;
+  }
+  if (state === 'error') {
+    return (
+      <div role="alert" className="bg-card border border-line rounded-md px-6 py-10 text-center">
+        <p className="font-display text-xl">The backtest could not load.</p>
+        <p className="text-sm text-ink-faint mt-1">No results were changed. Try the calculation again.</p>
+        <button onClick={load} className="mt-4 bg-olive text-cream font-mono text-[10px] tracking-widest px-4 py-2 rounded-sm">
+          RUN AGAIN
+        </button>
+      </div>
+    );
+  }
+  if (!report?.results?.length) {
+    return (
+      <div className="bg-card border border-line rounded-md px-6 py-10 text-center">
+        <p className="font-display text-xl">No backtest cohort is loaded.</p>
+        <p className="text-sm text-ink-faint mt-1">Initialize the seed set, then reload this page.</p>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -33,14 +63,14 @@ export default function Backtest() {
         Scored on pre-breakout evidence only, against {report.controls_total} control CS students at a {report.false_positive_pct}% false-positive rate.
       </p>
 
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <Metric label="recall" value={`${report.recall_pct}%`} detail={`${report.founders_flagged} of ${report.founders_total} founders`} />
         <Metric label="avg lead time" value={`${report.avg_lead_months}mo`} detail="before the world noticed" />
         <Metric label="false positives" value={`${report.false_positive_pct}%`} detail={`${report.false_positives} of ${report.controls_total} controls`} />
         <Metric label="pre-connected" value={report.flagged_with_seed_connection} detail="flagged founders already in a seed's orbit" />
       </div>
 
-      <div className="grid grid-cols-2 gap-6 mb-8">
+      <div className="grid lg:grid-cols-2 gap-6 mb-8">
         <div>
           <h3 className="label-mono mb-3">score distribution — founders vs controls</h3>
           <ScoreDistribution
@@ -69,7 +99,7 @@ export default function Backtest() {
       </div>
 
       <h3 className="label-mono mb-3">per-founder results (pre-breakout evidence only)</h3>
-      <div className="bg-card border border-line rounded-md overflow-hidden">
+      <div className="bg-card border border-line rounded-md overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="border-b border-line">

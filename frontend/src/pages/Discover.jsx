@@ -11,9 +11,10 @@ const POLL_MS = 1200;
 export default function Discover() {
   const [candidates, setCandidates] = useState([]);
   const [index, setIndex] = useState(0);
-  const [browseAll, setBrowseAll] = useState(false);
+  const [browseAll, setBrowseAll] = useState(true);
   const [evidenceId, setEvidenceId] = useState(null);
   const [cohort, setCohort] = useState('discovery');
+  const [loadState, setLoadState] = useState('loading');
 
   const [jobStatus, setJobStatus] = useState(null);
   const [running, setRunning] = useState(false);
@@ -21,15 +22,21 @@ export default function Discover() {
   const [newIds, setNewIds] = useState(new Set());
   const pollRef = useRef(null);
 
-  const loadCandidates = (which) =>
-    api.candidates(which).then((d) => {
+  const loadCandidates = (which) => {
+    setLoadState('loading');
+    return api.candidates(which).then((d) => {
       setCandidates(d.candidates);
       setIndex(0);
+      setLoadState('success');
       return d.candidates;
+    }).catch((error) => {
+      setLoadState('error');
+      throw error;
     });
+  };
 
   useEffect(() => {
-    loadCandidates(cohort).catch(console.error);
+    loadCandidates(cohort).catch(() => {});
   }, [cohort]);
 
   useEffect(() => () => clearInterval(pollRef.current), []);
@@ -58,16 +65,25 @@ export default function Discover() {
           if (status.state === 'done' || status.state === 'error') {
             clearInterval(pollRef.current);
             if (status.state === 'done') onComplete(priorIds);
-            else setRunning(false);
+            else {
+              setRunning(false);
+              setRunError('Discovery stopped before completing. Check the service logs, then try again.');
+            }
           }
         } catch (err) {
           clearInterval(pollRef.current);
           setRunning(false);
-          setRunError(err.message);
+          setRunError('Live progress was interrupted. Try the discovery run again.');
         }
       }, POLL_MS);
     } catch (err) {
-      setRunError(err.message);
+      setRunError(
+        err.status === 400
+          ? 'Live discovery needs a GitHub token. Add GITHUB_TOKEN to the service, then retry.'
+          : err.status === 409
+            ? 'A discovery run is already in progress. Wait a moment and retry.'
+            : 'Discovery could not start right now. Please try again.',
+      );
     }
   };
 
@@ -108,12 +124,37 @@ export default function Discover() {
       </div>
 
       {runError && (
-        <p className="font-mono text-[11px] text-red-500 mb-4 text-center">{runError}</p>
+        <div role="alert" className="border border-red-300 bg-red-50 rounded-sm px-4 py-3 mb-4 text-center">
+          <p className="text-sm text-red-700">{runError}</p>
+          <button onClick={runDiscovery} className="font-mono text-[10px] tracking-widest text-red-700 underline mt-1">
+            RETRY
+          </button>
+        </div>
       )}
       <PipelineProgress status={jobStatus} />
 
-      {!candidates.length ? (
-        <p className="font-mono text-xs text-ink-faint">loading candidates…</p>
+      {loadState === 'loading' ? (
+        <div className="bg-card border border-line rounded-md px-6 py-10 text-center">
+          <p className="font-display text-xl">Ranking the latest signals…</p>
+          <p className="text-sm text-ink-faint mt-1">This uses the evidence already stored in Signal Scout.</p>
+        </div>
+      ) : loadState === 'error' ? (
+        <div role="alert" className="bg-card border border-line rounded-md px-6 py-10 text-center">
+          <p className="font-display text-xl">The candidate list is unavailable.</p>
+          <p className="text-sm text-ink-faint mt-1">The data is safe. Reconnect and try loading it again.</p>
+          <button onClick={() => loadCandidates(cohort).catch(() => {})} className="mt-4 bg-olive text-cream font-mono text-[10px] tracking-widest px-4 py-2 rounded-sm">
+            TRY AGAIN
+          </button>
+        </div>
+      ) : !candidates.length ? (
+        <div className="bg-card border border-line rounded-md px-6 py-10 text-center">
+          <p className="font-display text-xl">No ranked {cohort === 'discovery' ? 'discoveries' : 'founders'} yet.</p>
+          <p className="text-sm text-ink-faint mt-1">
+            {cohort === 'discovery'
+              ? 'Run the live discovery pipeline after adding a GitHub token, or migrate the existing discovery database.'
+              : 'Initialize the seed set to load the backtest founders.'}
+          </p>
+        </div>
       ) : browseAll ? (
         <CandidateTable
           candidates={candidates}
