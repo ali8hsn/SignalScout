@@ -1,6 +1,9 @@
-"""Coresignal adapter — employee_base v2: search-filter POST for candidate ids,
-then a collect GET for the best match. Two credits per enrich (search + collect),
-so the caller's cache/budget guardrails matter here.
+"""Coresignal adapter — employee_base v2.
+
+A known profile uses the documented collect-by-shorthand endpoint. Otherwise,
+search-filter POST returns candidate ids and collect GET fetches the best match.
+Name searches use Coresignal's documented ``full_name`` filter and include the
+school when available to reduce false-positive merges.
 
 Coresignal's `created_at` is when the record first entered THEIR database — a
 first-seen proxy, not the true LinkedIn signup date. It maps to
@@ -8,6 +11,7 @@ first-seen proxy, not the true LinkedIn signup date. It maps to
 """
 
 import logging
+from urllib.parse import quote, urlparse
 
 import requests
 
@@ -34,15 +38,19 @@ class CoresignalProvider(EnrichmentProvider):
 
     def enrich_person(self, query: EnrichmentQuery) -> EnrichmentResult | None:
         self.last_error = None
-        filters: dict = {}
         if query.linkedin_url:
-            # Shorthand (slug) match is the precise employee_base filter for a known profile.
-            slug = query.linkedin_url.rstrip("/").rsplit("/", 1)[-1]
-            filters["shorthand_name"] = slug
-        elif query.name:
-            filters["name"] = query.name
-        else:
+            path = urlparse(query.linkedin_url).path.rstrip("/")
+            shorthand = path.rsplit("/", 1)[-1]
+            if not shorthand:
+                return None
+            record = self._collect(shorthand)
+            return self._map_person(record) if record else None
+
+        if not query.name:
             return None
+        filters = {"full_name": query.name}
+        if query.school:
+            filters["education_institution_name"] = query.school
 
         ids = self._search(filters)
         if not ids:
@@ -78,7 +86,8 @@ class CoresignalProvider(EnrichmentProvider):
 
     def _collect(self, record_id) -> dict | None:
         try:
-            resp = self.session.get(f"{API}/employee_base/collect/{record_id}", timeout=20)
+            encoded_id = quote(str(record_id), safe="")
+            resp = self.session.get(f"{API}/employee_base/collect/{encoded_id}", timeout=20)
             if resp.status_code != 200:
                 self.last_error = f"HTTP {resp.status_code}"
                 logger.warning("Coresignal collect %s -> %s: %s", record_id, resp.status_code, resp.text[:200])
