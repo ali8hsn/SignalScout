@@ -7,6 +7,8 @@ EDGE_TYPES = (
     "github_follows",
     "mutual_star",
     "co_author",
+    "co_contributor",
+    "org_mate",
     "hackathon_teammate",
     "fellowship_cohort",
     "twitter_follows",
@@ -17,7 +19,9 @@ EDGE_QUALITY: dict[str, float] = {
     "co_author": 1.0,
     "hackathon_teammate": 0.9,
     "fellowship_cohort": 0.8,
+    "co_contributor": 0.7,  # a working relationship beats a follow
     "mutual_star": 0.6,
+    "org_mate": 0.55,  # shared org: weaker than shipping code together, above a follow
     "github_follows": 0.5,
     "twitter_follows": 0.4,
 }

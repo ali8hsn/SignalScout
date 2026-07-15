@@ -97,6 +97,15 @@ class GithubClient:
     def followers(self, username: str, limit: int = 100) -> list[dict]:
         return self._get(f"/users/{username}/followers", {"per_page": limit}) or []
 
+    def repo_contributors(self, owner: str, repo: str, limit: int = 30) -> list[dict]:
+        return self._get(f"/repos/{owner}/{repo}/contributors", {"per_page": limit}) or []
+
+    def org_members(self, org: str, limit: int = 30) -> list[dict]:
+        return self._get(f"/orgs/{org}/members", {"per_page": limit}) or []
+
+    def user_orgs(self, username: str) -> list[dict]:
+        return self._get(f"/users/{username}/orgs") or []
+
 
 class GithubScraper(BaseScraper):
     name = "github"

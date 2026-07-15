@@ -110,6 +110,10 @@ class DiscoveryJobManager:
                 seeds,
                 max_per_seed=self.settings.discovery_max_per_seed,
                 on_progress=on_progress,
+                # tight collab caps: keep the scoped on-camera run short
+                repos_per_seed=2,
+                contributors_per_repo=15,
+                org_members_per_seed=15,
             )
             self._set_stage("scrape", status="done")
             self._set_stage("resolve", status="done", count=len(discovered))

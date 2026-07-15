@@ -15,6 +15,8 @@ EDGE_VERBS = {
     "github_follows": "follows them on GitHub",
     "mutual_star": "starred their work on GitHub",
     "co_author": "co-authored a paper with them",
+    "co_contributor": "contributes to the same repo as them",
+    "org_mate": "shares a GitHub org with them",
     "hackathon_teammate": "was their hackathon teammate",
     "fellowship_cohort": "shared a fellowship cohort with them",
     "twitter_follows": "follows them on X",
