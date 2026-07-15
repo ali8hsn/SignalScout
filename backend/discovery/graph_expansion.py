@@ -39,14 +39,21 @@ class GraphExpander:
         repos_per_seed: int = 3,
         contributors_per_repo: int = 30,
         org_members_per_seed: int = 30,
+        stargazers_per_repo: int = 20,
+        forkers_per_repo: int = 15,
+        interactions_per_repo: int = 20,
+        niche_repo_star_ceiling: int = 2000,
     ) -> list[Person]:
-        """One hop out from each seed, along follow, co-contributor, and org edges.
+        """One hop out from each seed across capped GitHub relationship surfaces.
 
         `seed_follows`  = the seed founder follows this person (high-signal).
         `follows_seed`  = this person follows the seed founder (lower-signal).
         `co_contributor` = contributes to one of the seed's top repos (working
         relationship — trusted above a follow).
         `org_mate`      = shares a public GitHub org with the seed.
+        `starred_repo`  = starred a seed-owned niche repo (one-way, not mutual).
+        `forked_repo`   = forked a seed-owned niche repo.
+        `issue_pr_interaction` = opened an issue or PR on a seed-owned niche repo.
         A candidate is kept only if unknown (see `_is_unknown`) and has at least
         one independent signal on their own GitHub profile.
 
@@ -82,17 +89,66 @@ class GraphExpander:
                 for user in users:
                     add_link(user.get("login"), seed_person, direction, {})
 
-            # Co-contributors on the seed's top non-fork repos (working relationships).
-            if repos_per_seed > 0 and contributors_per_repo > 0:
+            # Mine only a few top non-fork repos. Attention surfaces are limited
+            # to niche repos so popular projects do not swamp discovery.
+            if repos_per_seed > 0 and any(
+                cap > 0
+                for cap in (
+                    contributors_per_repo,
+                    stargazers_per_repo,
+                    forkers_per_repo,
+                    interactions_per_repo,
+                )
+            ):
                 repos = [r for r in self.scraper.client.repos(seed) if not r.get("fork")]
                 repos.sort(key=lambda r: -(r.get("stargazers_count") or 0))
                 for repo in repos[:repos_per_seed]:
-                    contributors = self.scraper.client.repo_contributors(
-                        seed, repo["name"], limit=contributors_per_repo
-                    )
-                    for user in contributors:
-                        add_link(user.get("login"), seed_person, "co_contributor",
-                                 {"repo": repo.get("full_name") or repo["name"]})
+                    repo_name = repo["name"]
+                    full_name = repo.get("full_name") or repo_name
+                    if contributors_per_repo > 0:
+                        contributors = self.scraper.client.repo_contributors(
+                            seed, repo_name, limit=contributors_per_repo
+                        )[:contributors_per_repo]
+                        for user in contributors:
+                            add_link(
+                                user.get("login"), seed_person, "co_contributor",
+                                {"repo": full_name},
+                            )
+
+                    stars = repo.get("stargazers_count") or 0
+                    if stars > niche_repo_star_ceiling:
+                        continue
+                    if stargazers_per_repo > 0:
+                        for user in self.scraper.client.repo_stargazers(
+                            seed, repo_name, limit=stargazers_per_repo
+                        )[:stargazers_per_repo]:
+                            add_link(
+                                user.get("login"), seed_person, "starred_repo",
+                                {"repo": full_name, "mutual": False},
+                            )
+                    if forkers_per_repo > 0:
+                        for fork in self.scraper.client.repo_forkers(
+                            seed, repo_name, limit=forkers_per_repo
+                        )[:forkers_per_repo]:
+                            owner = fork.get("owner") or {}
+                            add_link(
+                                owner.get("login"), seed_person, "forked_repo",
+                                {"repo": full_name},
+                            )
+                    if interactions_per_repo > 0:
+                        for issue in self.scraper.client.repo_issues(
+                            seed, repo_name, limit=interactions_per_repo
+                        )[:interactions_per_repo]:
+                            user = issue.get("user") or {}
+                            add_link(
+                                user.get("login"), seed_person, "issue_pr_interaction",
+                                {
+                                    "repo": full_name,
+                                    "number": issue.get("number"),
+                                    "kind": "pull_request" if issue.get("pull_request") else "issue",
+                                    "url": issue.get("html_url"),
+                                },
+                            )
 
             # Fellow members of the seed's public orgs.
             if org_members_per_seed > 0:
@@ -125,7 +181,13 @@ class GraphExpander:
                 continue  # no independent evidence -> not a candidate (spec §10)
 
             name = signals[0].person_name
-            person = Person(name=name, github_username=login, cohort="discovery")
+            person = Person(
+                name=name,
+                github_username=login,
+                cohort="discovery",
+                discovery_origin="github",
+                enrichment_status="pending_budget",
+            )
             person.graduation_year = parse_grad_year(profile.get("bio"))
             person.contact_info["github_followers"] = profile.get("followers", 0)
             person.contact_info["github_created_at"] = profile.get("created_at")
@@ -137,6 +199,10 @@ class GraphExpander:
                     # edge points source -> target where source follows target
                     src, tgt = (seed_person, person) if link_type == "seed_follows" else (person, seed_person)
                     edge_type, metadata = "github_follows", {"direction": link_type}
+                elif link_type in ("starred_repo", "forked_repo", "issue_pr_interaction"):
+                    # Candidate acted on the seed's repository: candidate -> seed.
+                    src, tgt = person, seed_person
+                    edge_type, metadata = link_type, dict(meta)
                 else:
                     # co_contributor / org_mate are symmetric; point seed -> candidate
                     src, tgt = seed_person, person

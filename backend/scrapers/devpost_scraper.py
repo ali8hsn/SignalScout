@@ -23,6 +23,10 @@ BASE = "https://devpost.com"
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) signal-scout/0.1"
 
 SOFTWARE_LINK_RE = re.compile(r'href="https://devpost\.com/software/([a-z0-9\-_]+)"')
+GITHUB_PROFILE_RE = re.compile(
+    r'href="https?://(?:www\.)?github\.com/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/?(?:["?#])',
+    re.IGNORECASE,
+)
 # Text-form profile anchor: <a class="user-profile-link" href="https://devpost.com/user">Name</a>
 TEAM_MEMBER_RE = re.compile(
     r'<a class="user-profile-link" href="https://devpost\.com/([A-Za-z0-9_.\-]+)">([^<]+)</a>'
@@ -70,6 +74,14 @@ class DevpostScraper:
             if slug not in seen:
                 seen.append(slug)
         return seen
+
+    def github_username(self, username: str) -> str | None:
+        """Return a GitHub login explicitly linked from a public Devpost profile."""
+        html = self._get(f"/{username}")
+        if not html:
+            return None
+        match = GITHUB_PROFILE_RE.search(html)
+        return match.group(1) if match else None
 
     def project(self, slug: str) -> dict | None:
         """Parsed project page: title, team (username, display name), submissions."""

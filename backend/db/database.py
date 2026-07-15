@@ -11,6 +11,7 @@ PostgresConnection translates it on the fly so both backends run the same code.
 import os
 import re
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -186,17 +187,26 @@ class Database:
         self.database_url = database_url if database_url is not None else os.environ.get("DATABASE_URL", "")
         self.backend: str = "postgres" if self.database_url else "sqlite"
         self._conn: sqlite3.Connection | PostgresConnection | None = None
+        self._local = threading.local()
+        self._sqlite_connections: list[sqlite3.Connection] = []
+        self._connections_lock = threading.Lock()
 
     @property
     def conn(self) -> "sqlite3.Connection | PostgresConnection":
-        if self._conn is None:
-            if self.backend == "postgres":
+        if self.backend == "postgres":
+            if self._conn is None:
                 self._conn = PostgresConnection(self.database_url)
-            else:
-                self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-                self._conn.row_factory = sqlite3.Row
-                self._conn.execute("PRAGMA foreign_keys = ON")
-        return self._conn
+            return self._conn
+
+        connection = getattr(self._local, "connection", None)
+        if connection is None:
+            connection = sqlite3.connect(self.db_path, check_same_thread=False)
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            self._local.connection = connection
+            with self._connections_lock:
+                self._sqlite_connections.append(connection)
+        return connection
 
     def init_schema(self) -> None:
         self.conn.executescript(SCHEMA_PATH.read_text())
@@ -220,6 +230,13 @@ class Database:
         self.init_schema()
 
     def close(self) -> None:
-        if self._conn is not None:
+        if self.backend == "postgres" and self._conn is not None:
             self._conn.close()
             self._conn = None
+            return
+        with self._connections_lock:
+            connections = self._sqlite_connections
+            self._sqlite_connections = []
+        for connection in connections:
+            connection.close()
+        self._local = threading.local()

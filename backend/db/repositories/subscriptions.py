@@ -43,6 +43,13 @@ class SubscriberRepository(BaseRepository):
         ).fetchone()
         return self._to_model(row) if row else None
 
+    def get(self, subscriber_id: str) -> Subscriber | None:
+        row = self.conn.execute(
+            "SELECT * FROM subscribers WHERE id = ?",
+            (subscriber_id,),
+        ).fetchone()
+        return self._to_model(row) if row else None
+
     def get_by_token(self, token: str) -> Subscriber | None:
         row = self.conn.execute(
             "SELECT * FROM subscribers WHERE unsubscribe_token = ?",

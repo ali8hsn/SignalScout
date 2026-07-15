@@ -1,0 +1,45 @@
+{
+  "_note": "Small opt-in seed set of publicly verifiable alumni. These people are known seeds, never discovery candidates.",
+  "alumni": [
+    {
+      "name": "Vitalik Buterin",
+      "program": "Thiel Fellowship",
+      "cohort_year": 2014,
+      "github_username": "vbuterin",
+      "source_url": "https://thielfellowship.org/",
+      "github_url": "https://github.com/vbuterin"
+    },
+    {
+      "name": "Dylan Field",
+      "program": "Thiel Fellowship",
+      "cohort_year": 2012,
+      "github_username": "dfield",
+      "source_url": "https://thielfellowship.org/",
+      "github_url": "https://github.com/dfield"
+    },
+    {
+      "name": "Zach Latta",
+      "program": "Thiel Fellowship",
+      "cohort_year": 2015,
+      "github_username": "zachlatta",
+      "source_url": "https://thielfellowship.org/",
+      "github_url": "https://github.com/zachlatta"
+    },
+    {
+      "name": "Aman Sanger",
+      "program": "Neo Scholars",
+      "cohort_year": 2020,
+      "github_username": "Sanger2000",
+      "source_url": "https://neo.com/scholars",
+      "github_url": "https://github.com/Sanger2000"
+    },
+    {
+      "name": "Michael Truell",
+      "program": "Neo Scholars",
+      "cohort_year": 2020,
+      "github_username": "truell20",
+      "source_url": "https://neo.com/scholars",
+      "github_url": "https://github.com/truell20"
+    }
+  ]
+}

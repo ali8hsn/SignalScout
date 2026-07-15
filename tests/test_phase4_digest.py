@@ -49,6 +49,7 @@ class Phase4DigestTests(unittest.TestCase):
             out_dir=root / "out",
             public_base_url="https://signals.example",
             cron_secret="test-secret",
+            admin_secret="test-admin-secret",
             resend_api_key="",
             digest_from_email="",
         )
@@ -77,6 +78,16 @@ class Phase4DigestTests(unittest.TestCase):
                     summary="Next.js passed 100,000 public GitHub stars.",
                 )
             ]
+        )
+        self.container.candidate_review_service.review(
+            self.person.id,
+            "approved",
+            why_now="A reviewed public project crossed a meaningful adoption threshold this month.",
+            notes="Test review.",
+            source_bucket="github_cross_source",
+            contactable=True,
+            primary_evidence_url="https://github.com/vercel/next.js",
+            reviewer="test",
         )
 
     def tearDown(self):
@@ -172,9 +183,9 @@ class Phase4DigestTests(unittest.TestCase):
 
         response = client.post(
             "/api/digest/test",
+            headers={"Authorization": "Bearer test-admin-secret"},
             json={
                 "email": signup["email"],
-                "token": signup["subscriber_token"],
             },
         )
 
@@ -192,9 +203,9 @@ class Phase4DigestTests(unittest.TestCase):
 
         response = client.post(
             "/api/digest/test",
+            headers={"Authorization": "Bearer test-admin-secret"},
             json={
                 "email": signup["email"],
-                "token": signup["subscriber_token"],
             },
         )
 
@@ -203,7 +214,7 @@ class Phase4DigestTests(unittest.TestCase):
         subscriber = self.container.subscribers.get_by_email(signup["email"])
         self.assertEqual(self.container.digest_sends.sent_person_ids(subscriber.id), set())
 
-    def test_test_digest_endpoint_rejects_invalid_token(self):
+    def test_test_digest_endpoint_rejects_unknown_subscriber(self):
         app = FastAPI()
         app.include_router(build_router(self.container))
         client = TestClient(app)
@@ -213,9 +224,9 @@ class Phase4DigestTests(unittest.TestCase):
 
         response = client.post(
             "/api/digest/test",
+            headers={"Authorization": "Bearer test-admin-secret"},
             json={
-                "email": "investor@example.com",
-                "token": "not-the-subscriber-token",
+                "email": "unknown@example.com",
             },
         )
 
@@ -231,11 +242,11 @@ class Phase4DigestTests(unittest.TestCase):
         self.container.subscriber_digest.sender = sender
         payload = {
             "email": signup["email"],
-            "token": signup["subscriber_token"],
         }
 
-        first = client.post("/api/digest/test", json=payload)
-        second = client.post("/api/digest/test", json=payload)
+        headers = {"Authorization": "Bearer test-admin-secret"}
+        first = client.post("/api/digest/test", json=payload, headers=headers)
+        second = client.post("/api/digest/test", json=payload, headers=headers)
 
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 429)
@@ -257,7 +268,7 @@ class Phase4DigestTests(unittest.TestCase):
             },
         )
         self.assertEqual(signup.status_code, 200)
-        self.assertTrue(signup.json()["subscriber_token"])
+        self.assertNotIn("subscriber_token", signup.json())
         subscriber = self.container.subscribers.get_by_email("investor@example.com")
         self.assertEqual(len(subscriber.preferences["seed_accounts"]), 2)
 
@@ -270,22 +281,49 @@ class Phase4DigestTests(unittest.TestCase):
         self.assertEqual(authorized.status_code, 200)
         self.assertTrue(authorized.json()["dry_run"])
 
+        feedback_token = self.container.email_action_signer.issue(
+            subscriber.id, "feedback", self.person.id, "up"
+        )
         feedback = client.get(
             "/api/digest/feedback",
             params={
-                "token": subscriber.unsubscribe_token,
+                "token": feedback_token,
                 "person_id": self.person.id,
                 "vote": "up",
             },
         )
         self.assertEqual(feedback.status_code, 200)
-        self.assertIn("All set", feedback.text)
+        self.assertIn("Confirm action", feedback.text)
+        self.assertIsNone(
+            self.container.db.conn.execute("SELECT 1 FROM feedback_votes").fetchone()
+        )
+        saved_feedback = client.post(
+            "/api/digest/feedback",
+            params={
+                "token": feedback_token,
+                "person_id": self.person.id,
+                "vote": "up",
+            },
+        )
+        self.assertIn("All set", saved_feedback.text)
 
+        unsubscribe_token = self.container.email_action_signer.issue(
+            subscriber.id, "unsubscribe"
+        )
         unsubscribe = client.get(
             "/api/digest/unsubscribe",
-            params={"token": subscriber.unsubscribe_token},
+            params={"token": unsubscribe_token},
         )
         self.assertEqual(unsubscribe.status_code, 200)
+        self.assertIn("Confirm action", unsubscribe.text)
+        self.assertTrue(
+            self.container.subscribers.get_by_email("investor@example.com").active
+        )
+        confirmed = client.post(
+            "/api/digest/unsubscribe",
+            params={"token": unsubscribe_token},
+        )
+        self.assertEqual(confirmed.status_code, 200)
         self.assertFalse(
             self.container.subscribers.get_by_email("investor@example.com").active
         )

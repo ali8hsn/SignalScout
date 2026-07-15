@@ -1,27 +1,37 @@
 """ProviderEnricher: licensed-provider (PDL / Coresignal) enrichment with guardrails.
 
-Merges an EnrichmentResult into a Person (linkedin_url, location, contact_info)
-and emits new scored signals — linkedin_created_recently / education_signal /
-job_change — for DISCOVERY-cohort people only. Founders and controls get contact
-merges at most, so backtest recall / false positives never move.
+Runs an ordered provider CHAIN — PDL first, Coresignal only when PDL returns a
+definitive no-match or lacks enough useful professional data. Merges an
+EnrichmentResult into a Person (linkedin_url, location, contact_info) and emits
+new scored signals — linkedin_created_recently / education_signal / job_change —
+for DISCOVERY-cohort people only. Founders and controls get contact merges at
+most, so backtest recall / false positives never move.
 
 Guardrails (hard requirements):
 - No provider configured -> every call is a silent no-op (keyless demo works).
-- enrichment_cache: provider+person key, 30-day TTL, misses cached too —
-  never re-fetch inside the TTL.
-- enrichment_usage: DAILY_ENRICHMENT_BUDGET fresh lookups per UTC day;
-  on exhaustion log a warning and skip, never raise.
+- enrichment_cache: provider+person key, 30-day TTL, misses cached too, so a PDL
+  miss never suppresses Coresignal and repeat runs make no paid calls.
+- Provider-scoped budgets (ProviderBudget): on exhaustion log a warning and skip,
+  never raise. Network/auth/quota failures are fail-soft and are NOT cached as
+  misses, so a rotated key retries cleanly.
+
+Signal semantics are deliberately conservative (dated, material evidence only):
+- PDL exposes no profile-creation date; a sparse connection count is a labeled
+  proxy for "likely new", never a known creation date.
+- Coresignal `created_at` is "first seen by Coresignal", an upper bound on age.
+- education_signal / job_change require a real date; metadata alone never scores.
 """
 
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from backend.config import Settings
-from backend.db.repositories.enrichment import EnrichmentCacheRepository, EnrichmentUsageRepository
+from backend.db.repositories.enrichment import EnrichmentCacheRepository
 from backend.db.repositories.signals import SignalRepository
 from backend.domain.person import Person
 from backend.domain.signal import Signal
+from backend.enrichment.budgets import ENRICH, ProviderBudget
 from backend.enrichment.providers.base import Education, EnrichmentProvider, EnrichmentQuery, EnrichmentResult, Position
 from backend.enrichment.providers.coresignal import CoresignalProvider
 from backend.enrichment.providers.pdl import PdlProvider
@@ -34,21 +44,28 @@ JOB_CHANGE_WINDOW_DAYS = 365    # a position started inside this window = fresh 
 LOW_CONNECTIONS_PROXY = 200     # PDL proxy: a real profile this sparse reads as new/young
 
 
+def build_provider_chain(settings: Settings) -> list[EnrichmentProvider]:
+    """Ordered enrichment chain: PDL first (primary), Coresignal fallback.
+
+    A provider joins the chain only if its key is present; a missing key silently
+    drops that provider, and an empty chain makes all enrichment a no-op.
+    """
+    chain: list[EnrichmentProvider] = []
+    if settings.pdl_api_key:
+        chain.append(PdlProvider(settings.pdl_api_key))
+    else:
+        logger.info("PDL_API_KEY not set — PDL enrichment disabled")
+    if settings.coresignal_api_key:
+        chain.append(CoresignalProvider(settings.coresignal_api_key))
+    else:
+        logger.info("CORESIGNAL_API_KEY not set — Coresignal fallback disabled")
+    return chain
+
+
 def build_provider(settings: Settings) -> EnrichmentProvider | None:
-    """ENRICHMENT_PROVIDER selector. Missing/unknown key -> None -> no-op enrichment."""
-    choice = settings.enrichment_provider.strip().lower()
-    if choice == "pdl":
-        if settings.pdl_api_key:
-            return PdlProvider(settings.pdl_api_key)
-        logger.info("PDL_API_KEY not set — provider enrichment disabled")
-        return None
-    if choice == "coresignal":
-        if settings.coresignal_api_key:
-            return CoresignalProvider(settings.coresignal_api_key)
-        logger.info("CORESIGNAL_API_KEY not set — provider enrichment disabled")
-        return None
-    logger.warning("Unknown ENRICHMENT_PROVIDER=%r — provider enrichment disabled", choice)
-    return None
+    """Back-compat single-provider selector (first available in the chain)."""
+    chain = build_provider_chain(settings)
+    return chain[0] if chain else None
 
 
 def _result_to_payload(result: EnrichmentResult) -> dict:
@@ -64,63 +81,225 @@ def _result_from_payload(payload: dict) -> EnrichmentResult:
         profile_created_at=payload.get("profile_created_at"),
         location=payload.get("location"),
         connections=payload.get("connections"),
+        provider=payload.get("provider"),
+        provider_person_id=payload.get("provider_person_id"),
+        full_name=payload.get("full_name"),
         raw=payload.get("raw", {}),
     )
+
+
+def _is_sufficient(result: EnrichmentResult) -> bool:
+    """Enough useful professional data to stop the chain (else try the fallback)."""
+    return bool(result.linkedin_url or result.education or result.positions)
+
+
+@dataclass
+class EnrichOutcome:
+    """Per-person result of a chain walk, for backfill reporting/auditing."""
+    status: str = "no_provider"  # matched | miss | skipped | no_provider
+    provider: str | None = None  # which provider produced the accepted match
+    fresh_call: bool = False     # a paid (or, in dry-run, would-be paid) call happened
+    from_cache: bool = False     # the accepted answer came from cache (no spend)
+    fallback: bool = False       # matched via a non-primary provider
+    new_signals: list[Signal] = field(default_factory=list)
 
 
 class ProviderEnricher:
     def __init__(
         self,
-        provider: EnrichmentProvider | None,
+        providers: list[EnrichmentProvider],
         signals: SignalRepository,
         cache: EnrichmentCacheRepository,
-        usage: EnrichmentUsageRepository,
-        daily_budget: int,
+        budget: ProviderBudget,
     ):
-        self.provider = provider
+        self.providers = providers
         self.signals = signals
         self.cache = cache
-        self.usage = usage
-        self.daily_budget = daily_budget
+        self.budget = budget
+
+    @property
+    def provider(self) -> EnrichmentProvider | None:
+        """First provider in the chain (kept for callers that only test presence)."""
+        return self.providers[0] if self.providers else None
 
     def enrich(self, person: Person) -> list[Signal]:
-        """Fetch (or reuse cached) provider data, merge into `person` in place,
-        and persist any new signals. Returns the newly-saved signals. Never raises
-        into the pipeline — degraded modes all return []."""
-        if self.provider is None:
-            return []
-        result = self._fetch(person)
-        if result is None:
-            return []
+        """Walk the provider chain and persist new discovery signals (see `run`)."""
+        return self.run(person).new_signals
 
-        self._merge_contacts(person, result)
+    def apply_result(
+        self,
+        person: Person,
+        provider: EnrichmentProvider,
+        result: EnrichmentResult,
+        evidence_tier: str | None = None,
+    ) -> list[Signal]:
+        """Merge an already-fetched provider result (e.g. from provider search)
+        into `person` and persist derived discovery signals. No provider call,
+        no budget spend — the caller already paid for `result`."""
+        self._merge_contacts(person, provider, result)
         if person.cohort != "discovery":
-            return []  # founders/controls: contact fields only, never scored signals
-
-        new_signals = self._derive_signals(person, result)
+            return []
+        new_signals = self._derive_signals(
+            person,
+            provider,
+            result,
+            evidence_tier=evidence_tier,
+        )
         if new_signals:
             self.signals.save_many(new_signals)
         return new_signals
 
-    # -- fetch with cache + budget ------------------------------------------
+    def run(self, person: Person, dry_run: bool = False) -> EnrichOutcome:
+        """Walk the provider chain (PDL -> Coresignal). Merge the first useful
+        result into `person` in place and persist any new discovery-cohort
+        signals. Returns an EnrichOutcome for reporting. Never raises into the
+        pipeline — degraded modes report a benign status. In dry-run, no provider
+        is ever called and no credit/cache slot is ever spent."""
+        if not self.providers:
+            return self._finalize(
+                person,
+                EnrichOutcome(status="no_provider"),
+                dry_run,
+            )
 
-    def _fetch(self, person: Person) -> EnrichmentResult | None:
+        outcome = EnrichOutcome(status="miss")
+        matched: tuple[EnrichmentProvider, EnrichmentResult] | None = None
+        for index, provider in enumerate(self.providers):
+            status, result = self._fetch(provider, person, dry_run=dry_run)
+            if status not in ("cache_match", "cache_miss"):
+                outcome.provider = provider.name
+            if status in ("match", "miss"):
+                outcome.fresh_call = True  # a paid call was made this run
+            if status == "error":
+                outcome.status = "error"
+                break  # fail-soft: stop, keep whatever we merged
+            if status == "budget":
+                if matched is None:
+                    outcome.status = "skipped"
+                break
+            if status == "would_attempt":
+                # dry-run: a fresh call WOULD be made here; the result is unknown.
+                return self._finalize(
+                    person,
+                    EnrichOutcome(
+                        status="attempted",
+                        provider=provider.name,
+                        fresh_call=True,
+                        fallback=index > 0,
+                    ),
+                    dry_run,
+                )
+            if status in ("cache_miss", "miss"):
+                continue  # definitive no-match — fall through to the fallback
+            # match (fresh) or cache_match: a usable result
+            if not dry_run:
+                self._merge_contacts(person, provider, result)
+            if matched is None or _is_sufficient(result):
+                matched = (provider, result)
+                outcome.provider = provider.name
+                outcome.fallback = index > 0
+                outcome.from_cache = status == "cache_match"
+            if _is_sufficient(result):
+                break
+
+        if matched is None:
+            return self._finalize(person, outcome, dry_run)
+
+        outcome.status = "matched"
+        provider, result = matched
+        if dry_run or person.cohort != "discovery":
+            return self._finalize(
+                person,
+                outcome,
+                dry_run,
+            )  # founders/controls: contact fields only, never scored signals
+        new_signals = self._derive_signals(person, provider, result)
+        if new_signals:
+            self.signals.save_many(new_signals)
+        outcome.new_signals = new_signals
+        return self._finalize(person, outcome, dry_run)
+
+    def prioritize(self, people: list[Person]) -> list[Person]:
+        """Put high-scoring, GitHub-only pending candidates first."""
+
+        def priority(person: Person) -> tuple[int, int, float, str]:
+            sources = {signal.source for signal in self.signals.for_person(person.id)}
+            github_only = bool(person.github_username) and sources.issubset({"github"})
+            pending = person.enrichment_status in (None, "pending_budget")
+            return (
+                0 if github_only and pending else 1,
+                0 if github_only else 1,
+                -(person.score or 0),
+                person.name.lower(),
+            )
+
+        return sorted(people, key=priority)
+
+    def pending_github_count(self, people: list[Person]) -> int:
+        return sum(
+            1
+            for person in people
+            if person.github_username
+            and person.enrichment_status in (None, "pending_budget")
+            and {
+                signal.source
+                for signal in self.signals.for_person(person.id)
+            }.issubset({"github"})
+        )
+
+    @staticmethod
+    def _finalize(
+        person: Person,
+        outcome: EnrichOutcome,
+        dry_run: bool,
+    ) -> EnrichOutcome:
+        if dry_run or person.cohort != "discovery" or not person.github_username:
+            return outcome
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        if outcome.status == "matched":
+            person.enrichment_status = "provider_enriched"
+            person.enrichment_provider = outcome.provider
+        elif outcome.status == "miss":
+            person.enrichment_status = "provider_no_match"
+            person.enrichment_provider = outcome.provider
+        elif outcome.status == "error":
+            person.enrichment_status = "provider_error"
+            person.enrichment_provider = outcome.provider
+        elif outcome.status in ("skipped", "no_provider"):
+            person.enrichment_status = "pending_budget"
+        else:
+            return outcome
+        person.enrichment_updated_at = now
+        return outcome
+
+    # -- fetch with provider-scoped cache + budget --------------------------
+
+    def _fetch(
+        self, provider: EnrichmentProvider, person: Person, dry_run: bool = False
+    ) -> tuple[str, EnrichmentResult | None]:
+        """Returns (status, result). Statuses:
+        cache_match / cache_miss (served from cache, no spend),
+        match / miss (fresh definitive answer, spent + cached),
+        would_attempt (dry-run: a fresh call would happen here),
+        error / budget (fail-soft; never spent or cached)."""
         now = datetime.now(timezone.utc)
-        cached = self.cache.get(self.provider.name, person.id)
+        cached = self.cache.get(provider.name, person.id)
         if cached is not None:
             payload, fetched_at = cached
             age = now - datetime.fromisoformat(fetched_at)
             if age <= timedelta(days=CACHE_TTL_DAYS):
-                return _result_from_payload(payload) if payload else None  # {} = cached miss
+                if payload:
+                    return "cache_match", _result_from_payload(payload)
+                return "cache_miss", None  # {} = cached miss, authoritative inside TTL
 
-        today = now.date().isoformat()
-        used = self.usage.count_for(today)
-        if used >= self.daily_budget:
+        if not self.budget.can_spend(provider.name, ENRICH):
             logger.warning(
-                "Daily enrichment budget exhausted (%d/%d) — skipping %s",
-                used, self.daily_budget, person.name,
+                "%s enrich budget exhausted — skipping %s", provider.name, person.name
             )
-            return None
+            return "budget", None
+
+        if dry_run:
+            return "would_attempt", None  # never call the provider or spend a credit
 
         query = EnrichmentQuery(
             name=person.name,
@@ -129,44 +308,52 @@ class ProviderEnricher:
             github_username=person.github_username,
             linkedin_url=person.linkedin_url,
         )
-        result = self.provider.enrich_person(query)
-        if result is None and self.provider.last_error:
+        result = provider.enrich_person(query)
+        if result is None and provider.last_error:
             # Auth / credits / network failure — not a real miss: don't burn a
             # 30-day cache slot or a budget credit on it.
             logger.warning(
                 "%s enrichment failed for %s (%s) — not cached",
-                self.provider.name, person.name, self.provider.last_error,
+                provider.name, person.name, provider.last_error,
             )
-            return None
-        self.usage.increment(today)
+            return "error", None
+        self.budget.spend(provider.name, ENRICH)
         self.cache.put(
-            self.provider.name, person.id,
+            provider.name, person.id,
             _result_to_payload(result) if result else {},
             now.isoformat(timespec="seconds"),
         )
-        return result
+        if result is None:
+            return "miss", None
+        return "match", result
 
     # -- merge (idempotent, never overwrites existing values) ---------------
 
-    def _merge_contacts(self, person: Person, result: EnrichmentResult) -> None:
+    def _merge_contacts(self, person: Person, provider: EnrichmentProvider, result: EnrichmentResult) -> None:
         if result.linkedin_url and not person.linkedin_url:
             person.linkedin_url = result.linkedin_url
-            person.contact_info["linkedin_source"] = self.provider.name
+            person.contact_info["linkedin_source"] = provider.name
         if result.location and not person.current_location:
             person.current_location = result.location
         if result.headline:
             person.contact_info.setdefault("headline", result.headline)
         if result.connections is not None:
             person.contact_info["linkedin_connections"] = result.connections
-        person.contact_info["enriched_by"] = self.provider.name
+        person.contact_info["enriched_by"] = provider.name
 
     # -- new scored signals (discovery cohort only) --------------------------
 
-    def _derive_signals(self, person: Person, result: EnrichmentResult) -> list[Signal]:
+    def _derive_signals(
+        self,
+        person: Person,
+        provider: EnrichmentProvider,
+        result: EnrichmentResult,
+        evidence_tier: str | None = None,
+    ) -> list[Signal]:
         today = datetime.now(timezone.utc).date()
         existing_types = {
             s.signal_type for s in self.signals.for_person(person.id)
-            if s.source == self.provider.name
+            if s.source == provider.name
         }
         signals: list[Signal] = []
 
@@ -176,32 +363,45 @@ class ProviderEnricher:
                 signals.append(signal)
 
         created = self._parse(result.profile_created_at)
-        if created and (today - created).days <= RECENT_PROFILE_DAYS:
+        if (
+            evidence_tier != "review"
+            and created
+            and 0 <= (today - created).days <= RECENT_PROFILE_DAYS
+        ):
+            # Coresignal only: "first seen by Coresignal", an upper bound on age.
             emit(Signal(
                 person_name=person.name, signal_type="linkedin_created_recently",
                 signal_category="network", signal_date=created.isoformat(),
-                signal_strength=0.9, source=self.provider.name,
+                signal_strength=0.7, source=provider.name,
                 source_url=result.linkedin_url or "",
-                summary=f"LinkedIn profile first seen {created.isoformat()} — brand new",
+                summary=f"Profile first seen by {provider.name.title()} {created.isoformat()} "
+                        f"(first-seen date, not a known LinkedIn creation date)",
                 raw_data=result.raw,
+                metadata={"evidence": "provider_first_seen", "provider": provider.name},
             ))
         elif (
-            result.connections is not None
+            evidence_tier != "review"
+            and result.profile_created_at is None
+            and result.connections is not None
             and result.connections < LOW_CONNECTIONS_PROXY
             and result.linkedin_url
         ):
-            # PDL never exposes profile age; a very sparse network is the proxy.
+            # PDL never exposes profile age; a very sparse network is a labeled
+            # PROXY for "likely new" — never presented as a known creation date.
             emit(Signal(
                 person_name=person.name, signal_type="linkedin_created_recently",
                 signal_category="network", signal_date=today.isoformat(),
-                signal_strength=0.6, source=self.provider.name,
+                signal_strength=0.5, source=provider.name,
                 source_url=result.linkedin_url,
-                summary=f"LinkedIn profile with only {result.connections} connections — likely new",
+                summary=f"Sparse LinkedIn network ({result.connections} connections) — "
+                        f"proxy for a likely-new profile, not a known creation date",
                 raw_data=result.raw,
+                metadata={"evidence": "sparse_connections_proxy", "connections": result.connections},
             ))
 
         education = self._best_education(result.education)
-        if education:
+        if education and (education.start_date or education.end_date):
+            # Dated, material evidence only — metadata alone never scores.
             is_current = education.end_date is None or (
                 (end := self._parse(education.end_date)) is not None and end >= today
             )
@@ -209,27 +409,28 @@ class ProviderEnricher:
             emit(Signal(
                 person_name=person.name, signal_type="education_signal",
                 signal_category="education",
-                signal_date=education.start_date or today.isoformat(),
+                signal_date=education.start_date or education.end_date,
                 signal_strength=0.7 if is_current else 0.5,
-                source=self.provider.name, source_url=result.linkedin_url or "",
+                source=provider.name, source_url=result.linkedin_url or "",
                 summary=f"{'Studying' if is_current else 'Studied'} at {education.school}"
                         + (f" ({degree_bits})" if degree_bits else ""),
                 metadata={"school": education.school, "degree": education.degree,
-                          "end_date": education.end_date},
+                          "end_date": education.end_date, "evidence": "dated_education"},
             ))
 
         position = self._latest_position(result.positions)
-        if position and position.start_date:
+        if evidence_tier != "review" and position and position.start_date:
             started = self._parse(position.start_date)
-            if started and (today - started).days <= JOB_CHANGE_WINDOW_DAYS:
+            if started and 0 <= (today - started).days <= JOB_CHANGE_WINDOW_DAYS:
                 role = " ".join(b for b in (position.title, "at" if position.company else None, position.company) if b)
                 emit(Signal(
                     person_name=person.name, signal_type="job_change",
                     signal_category="career", signal_date=started.isoformat(),
-                    signal_strength=0.7, source=self.provider.name,
+                    signal_strength=0.7, source=provider.name,
                     source_url=result.linkedin_url or "",
                     summary=f"Recent move: {role or 'new position'} ({started.isoformat()})",
-                    metadata={"company": position.company, "title": position.title},
+                    metadata={"company": position.company, "title": position.title,
+                              "evidence": "dated_position"},
                 ))
         return signals
 

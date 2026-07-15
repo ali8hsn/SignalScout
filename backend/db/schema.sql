@@ -22,11 +22,37 @@ CREATE TABLE IF NOT EXISTS persons (
     thesis TEXT,
     score REAL,
     needs_review INTEGER NOT NULL DEFAULT 0,
+    discovery_origin TEXT,
+    evidence_tier TEXT,
+    review_required INTEGER NOT NULL DEFAULT 0,
+    enrichment_status TEXT,
+    enrichment_provider TEXT,
+    enrichment_updated_at TEXT,
     notes TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_persons_github ON persons(github_username);
 CREATE INDEX IF NOT EXISTS idx_persons_cohort ON persons(cohort);
+
+-- Human launch review is separate from machine/provider review metadata.
+-- approved_at is preserved across edits while approved and defines launch newness.
+CREATE TABLE IF NOT EXISTS candidate_reviews (
+    person_id TEXT PRIMARY KEY REFERENCES persons(id),
+    state TEXT NOT NULL DEFAULT 'pending'
+        CHECK (state IN ('pending', 'approved', 'rejected')),
+    why_now TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    source_bucket TEXT NOT NULL DEFAULT ''
+        CHECK (source_bucket IN ('', 'github_cross_source', 'provider_discovered', 'manual_public')),
+    contactable INTEGER NOT NULL DEFAULT 0,
+    primary_evidence_url TEXT NOT NULL DEFAULT '',
+    reviewer TEXT NOT NULL DEFAULT '',
+    approved_at TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_reviews_launch
+    ON candidate_reviews(state, contactable, approved_at);
 
 CREATE TABLE IF NOT EXISTS signals (
     id TEXT PRIMARY KEY,
@@ -91,10 +117,54 @@ CREATE TABLE IF NOT EXISTS enrichment_cache (
 
 CREATE INDEX IF NOT EXISTS idx_enrichment_cache_person ON enrichment_cache(person_id);
 
--- One row per UTC day; enforces DAILY_ENRICHMENT_BUDGET (skip, never error).
+-- Provider-scoped usage: one row per (provider, lane, UTC day). Daily/monthly
+-- budgets aggregate over these rows (skip on exhaustion, never error). Lanes:
+-- 'search' (provider-search discovery) and 'enrich' (one-person enrichment).
 CREATE TABLE IF NOT EXISTS enrichment_usage (
-    day TEXT PRIMARY KEY,  -- YYYY-MM-DD (UTC)
-    count INTEGER NOT NULL DEFAULT 0
+    provider TEXT NOT NULL,
+    lane TEXT NOT NULL DEFAULT 'enrich',
+    day TEXT NOT NULL,  -- YYYY-MM-DD (UTC)
+    count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (provider, lane, day)
+);
+
+-- Stable provider-search identities. Keyed by (provider, provider_person_id) so
+-- the same person surfacing again from PDL/Coresignal is deduped to one person,
+-- never re-created. canonical_linkedin backs the second dedupe tier.
+CREATE TABLE IF NOT EXISTS provider_identities (
+    provider TEXT NOT NULL,
+    provider_person_id TEXT NOT NULL,
+    person_id TEXT NOT NULL REFERENCES persons(id),
+    canonical_linkedin TEXT,
+    observed_at TEXT NOT NULL,
+    PRIMARY KEY (provider, provider_person_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_identities_person ON provider_identities(person_id);
+CREATE INDEX IF NOT EXISTS idx_provider_identities_linkedin ON provider_identities(canonical_linkedin);
+
+-- Resumable provider-search state and cumulative audit outcomes. A stable hash
+-- of the effective, adapter-allowlisted filter is the filter identity.
+CREATE TABLE IF NOT EXISTS provider_search_checkpoints (
+    provider TEXT NOT NULL,
+    filter_identity TEXT NOT NULL,
+    filters_json TEXT NOT NULL,
+    cursor TEXT,
+    next_page INTEGER NOT NULL DEFAULT 0,
+    exhausted INTEGER NOT NULL DEFAULT 0,
+    requested_pages INTEGER NOT NULL DEFAULT 0,
+    api_requests INTEGER NOT NULL DEFAULT 0,
+    returned_records INTEGER NOT NULL DEFAULT 0,
+    credit_units INTEGER NOT NULL DEFAULT 0,
+    verified_count INTEGER NOT NULL DEFAULT 0,
+    review_count INTEGER NOT NULL DEFAULT 0,
+    merged_count INTEGER NOT NULL DEFAULT 0,
+    duplicate_count INTEGER NOT NULL DEFAULT 0,
+    rejected_count INTEGER NOT NULL DEFAULT 0,
+    rejection_reasons TEXT NOT NULL DEFAULT '{}',
+    last_outcome TEXT NOT NULL DEFAULT 'never_run',
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (provider, filter_identity)
 );
 
 -- Phase 4 email digest subscriptions. Booleans remain INTEGER so the schema is

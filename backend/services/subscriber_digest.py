@@ -10,6 +10,7 @@ from backend.db.repositories.subscriptions import (
 )
 from backend.digest.sender import EmailMessage, EmailSender
 from backend.domain.subscriber import Subscriber
+from backend.security.email_actions import EmailActionSigner
 from backend.services.candidate_service import CandidateService
 
 
@@ -21,6 +22,7 @@ class SubscriberDigestService:
         candidates: CandidateService,
         sender: EmailSender,
         public_base_url: str,
+        action_signer: EmailActionSigner,
         size: int = 10,
     ):
         self.subscribers = subscribers
@@ -28,6 +30,7 @@ class SubscriberDigestService:
         self.candidates = candidates
         self.sender = sender
         self.public_base_url = public_base_url.rstrip("/")
+        self.action_signer = action_signer
         self.size = size
 
     def build(self, subscriber: Subscriber) -> tuple[EmailMessage, list[str]]:
@@ -36,8 +39,16 @@ class SubscriberDigestService:
             candidate
             for candidate in self.candidates.list_candidates("discovery")
             if candidate["id"] not in sent_ids
+            and candidate.get("approval_state") == "approved"
+            and candidate.get("contactable")
         ]
-        pool.sort(key=lambda candidate: self._preference_rank(candidate, subscriber), reverse=True)
+        pool.sort(
+            key=lambda candidate: (
+                candidate.get("approved_at") or "",
+                self._preference_rank(candidate, subscriber),
+            ),
+            reverse=True,
+        )
         picks = pool[: self.size]
         today = datetime.now(timezone.utc).date().isoformat()
         subject = f"Signal Scout — {len(picks)} people to know ({today})"
@@ -49,6 +60,26 @@ class SubscriberDigestService:
             ),
             [candidate["id"] for candidate in picks],
         )
+
+    def preview(self, subscriber: Subscriber) -> dict:
+        message, person_ids = self.build(subscriber)
+        candidates_by_id = {
+            candidate["id"]: candidate
+            for candidate in self.candidates.list_candidates("discovery")
+        }
+        picks = [candidates_by_id[person_id] for person_id in person_ids]
+        source_mix: dict[str, int] = {}
+        for candidate in picks:
+            bucket = candidate.get("source_bucket") or "unclassified"
+            source_mix[bucket] = source_mix.get(bucket, 0) + 1
+        return {
+            "subject": message.subject,
+            "html": message.html,
+            "text": message.text,
+            "candidate_count": len(picks),
+            "candidates": picks,
+            "source_mix": dict(sorted(source_mix.items())),
+        }
 
     def deliver(self, subscriber: Subscriber, dry_run: bool = False) -> dict:
         message, person_ids = self.build(subscriber)
@@ -113,7 +144,7 @@ class SubscriberDigestService:
         haystack = " ".join(
             [
                 str(candidate.get("area") or ""),
-                str(candidate.get("thesis") or ""),
+                str(candidate.get("reviewed_why_now") or candidate.get("why_now") or ""),
                 *[
                     f"{signal.get('type', '')} {signal.get('summary', '')}"
                     for signal in candidate.get("top_signals", [])
@@ -124,16 +155,18 @@ class SubscriberDigestService:
         return matches, float(candidate.get("score") or 0)
 
     def _feedback_url(self, subscriber: Subscriber, person_id: str, vote: str) -> str:
+        token = self.action_signer.issue(subscriber.id, "feedback", person_id, vote)
         return (
             f"{self.public_base_url}/api/digest/feedback"
-            f"?token={quote(subscriber.unsubscribe_token, safe='')}"
+            f"?token={quote(token, safe='')}"
             f"&person_id={quote(person_id, safe='')}&vote={vote}"
         )
 
     def _unsubscribe_url(self, subscriber: Subscriber) -> str:
+        token = self.action_signer.issue(subscriber.id, "unsubscribe")
         return (
             f"{self.public_base_url}/api/digest/unsubscribe"
-            f"?token={quote(subscriber.unsubscribe_token, safe='')}"
+            f"?token={quote(token, safe='')}"
         )
 
     def _render_html(self, subscriber: Subscriber, picks: list[dict], today: str) -> str:
@@ -149,7 +182,7 @@ class SubscriberDigestService:
             links = "".join(
                 f'<a href="{esc(url, quote=True)}" style="color:#60652b;margin-right:14px">{esc(label.title())}</a>'
                 for label, url in (candidate.get("contact_links") or {}).items()
-                if label in {"linkedin", "x", "github"} and url
+                if label in {"linkedin", "x", "github", "email", "site"} and url
             )
             context = " · ".join(
                 part
@@ -160,10 +193,17 @@ class SubscriberDigestService:
                 if part
             )
             description = (
-                candidate.get("thesis")
+                candidate.get("reviewed_why_now")
                 or candidate.get("why_now")
                 or candidate.get("area")
                 or "Showing multiple early signals worth a closer look."
+            )
+            provenance = candidate.get("primary_evidence_url") or ""
+            provenance_link = (
+                f'<a href="{esc(provenance, quote=True)}" style="color:#60652b">'
+                "Primary public evidence</a>"
+                if provenance
+                else ""
             )
             up_url = self._feedback_url(subscriber, person_id, "up")
             down_url = self._feedback_url(subscriber, person_id, "down")
@@ -175,7 +215,7 @@ class SubscriberDigestService:
                   <div style="color:#716d5e;font:12px ui-monospace,monospace">{esc(context)}</div>
                   <p style="font-size:15px;line-height:1.45;margin:12px 0">{esc(description)}</p>
                   <div style="font-size:13px;line-height:1.5"><strong>Triggering signals</strong><ul style="padding-left:20px;margin:6px 0 12px">{signal_items}</ul></div>
-                  <div style="font:12px ui-monospace,monospace">{links}</div>
+                  <div style="font:12px ui-monospace,monospace">{links}{provenance_link}</div>
                   <div style="border-top:1px solid #e4e0d2;margin-top:14px;padding-top:10px;font-size:13px">
                     Useful?
                     <a href="{esc(up_url, quote=True)}" style="text-decoration:none;margin-left:8px">👍 Yes</a>
@@ -210,7 +250,7 @@ class SubscriberDigestService:
                 if part
             )
             description = (
-                candidate.get("thesis")
+                candidate.get("reviewed_why_now")
                 or candidate.get("why_now")
                 or candidate.get("area")
                 or "Showing multiple early signals worth a closer look."
@@ -223,8 +263,10 @@ class SubscriberDigestService:
             for signal in candidate.get("top_signals") or []:
                 lines.append(f"- {signal.get('summary') or signal.get('type') or 'Signal recorded'}")
             for label, url in (candidate.get("contact_links") or {}).items():
-                if label in {"linkedin", "x", "github"} and url:
+                if label in {"linkedin", "x", "github", "email", "site"} and url:
                     lines.append(f"{label.title()}: {url}")
+            if candidate.get("primary_evidence_url"):
+                lines.append(f"Primary evidence: {candidate['primary_evidence_url']}")
             lines.append(f"Useful: {self._feedback_url(subscriber, candidate['id'], 'up')}")
             lines.append(f"Not useful: {self._feedback_url(subscriber, candidate['id'], 'down')}")
             lines.append("")

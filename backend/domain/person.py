@@ -9,7 +9,7 @@ class Person:
     name: str
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     aliases: list[str] = field(default_factory=list)
-    cohort: str = "unknown"  # founder | control | discovery | unknown
+    cohort: str = "unknown"  # founder | control | discovery | seed | demo | unknown
 
     github_username: str | None = None
     twitter_handle: str | None = None
@@ -31,6 +31,12 @@ class Person:
 
     score: float | None = None
     needs_review: bool = False
+    discovery_origin: str | None = None
+    evidence_tier: str | None = None
+    review_required: bool = False
+    enrichment_status: str | None = None
+    enrichment_provider: str | None = None
+    enrichment_updated_at: str | None = None
     notes: str | None = None
 
     def display_contacts(self) -> dict[str, str]:

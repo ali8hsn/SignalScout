@@ -20,6 +20,7 @@ from backend.enrichment.providers.base import (
     EnrichmentQuery,
     EnrichmentResult,
     Position,
+    ProviderSearchPage,
     normalize_date,
 )
 
@@ -27,6 +28,25 @@ logger = logging.getLogger(__name__)
 
 API = "https://api.peopledatalabs.com/v5"
 DEFAULT_MIN_LIKELIHOOD = 6  # PDL scale 0-10; >=6 is a confident single-person match
+
+# Allowlisted search filters: our filter key -> PDL person-schema column. Only
+# these columns can ever reach the query, so filter values are never interpolated
+# into an arbitrary column reference (values are still escaped, see _escape).
+SEARCH_COLUMNS = {
+    "school": "education.school.name",
+    "major": "education.majors",
+    "degree": "education.degrees",
+    "location": "location_locality",
+    "region": "location_region",
+    "country": "location_country",
+    "title_role": "job_title_role",
+    "title_level": "job_title_levels",
+    "industry": "industry",
+}
+SEARCH_RANGE_COLUMNS = {
+    "education_end_date_gte": ("education.end_date", ">="),
+}
+MAX_SEARCH_SIZE = 100
 
 
 def _clean(value) -> str | None:
@@ -36,6 +56,7 @@ def _clean(value) -> str | None:
 
 class PdlProvider(EnrichmentProvider):
     name = "pdl"
+    supported_search_filters = frozenset((*SEARCH_COLUMNS, *SEARCH_RANGE_COLUMNS))
 
     def __init__(self, api_key: str, min_likelihood: int = DEFAULT_MIN_LIKELIHOOD, session: requests.Session | None = None):
         self.min_likelihood = min_likelihood
@@ -67,21 +88,89 @@ class PdlProvider(EnrichmentProvider):
             return None
         return self._map_person(data)
 
-    def search_people(self, filters: dict) -> list[EnrichmentResult]:
-        """Person Search via SQL syntax; `filters` maps column -> exact value."""
-        if not filters:
-            return []
-        where = " AND ".join(f"{col} = '{val}'" for col, val in filters.items())
-        body = {"sql": f"SELECT * FROM person WHERE {where}", "size": 10}
+    def search_people(self, filters: dict, size: int = 10) -> list[EnrichmentResult]:
+        return self.search_page(filters, size=size).results
+
+    def search_page(
+        self,
+        filters: dict,
+        size: int = 10,
+        cursor: str | None = None,
+    ) -> ProviderSearchPage:
+        """Person Search via SQL. `filters` keys are ALLOWLISTED (SEARCH_COLUMNS);
+        unknown keys are ignored and values are escaped — never interpolated as
+        arbitrary column references. PDL uses its documented ``from`` offset."""
+        self.last_error = None
+        where = self._build_where(filters)
+        if not where:
+            return ProviderSearchPage()
+        try:
+            offset = max(0, int(cursor or 0))
+        except (TypeError, ValueError):
+            offset = 0
+        limit = max(1, min(size, MAX_SEARCH_SIZE))
+        body = {
+            "sql": f"SELECT * FROM person WHERE {where}",
+            "size": limit,
+            "from": offset,
+        }
         try:
             resp = self.session.post(f"{API}/person/search", json=body, timeout=20)
+            if resp.status_code == 404:
+                return ProviderSearchPage(api_requests=1)  # no matches — definitive
             if resp.status_code != 200:
+                self.last_error = f"HTTP {resp.status_code}"
                 logger.warning("PDL search -> %s: %s", resp.status_code, resp.text[:200])
-                return []
-            return [self._map_person(rec) for rec in resp.json().get("data", [])]
+                return ProviderSearchPage(api_requests=1)
+            payload = resp.json()
+            records = payload.get("data", [])
+            results = [self._map_person(rec) for rec in records]
+            total = payload.get("total")
+            has_more = (
+                offset + len(records) < total
+                if isinstance(total, int)
+                else len(records) == limit
+            )
+            return ProviderSearchPage(
+                results=results,
+                next_cursor=str(offset + len(records)) if has_more else None,
+                exhausted=not has_more,
+                api_requests=1,
+                returned_records=len(records),
+                # PDL search usage is tracked by records returned, separately
+                # from the single HTTP request.
+                credit_units=len(records),
+            )
         except requests.RequestException as exc:
+            self.last_error = str(exc)
             logger.warning("PDL search request failed: %s", exc)
-            return []
+            return ProviderSearchPage(api_requests=1)
+
+    def _build_where(self, filters: dict) -> str:
+        clauses: list[str] = []
+        for key, value in (filters or {}).items():
+            column = SEARCH_COLUMNS.get(key)
+            range_column = SEARCH_RANGE_COLUMNS.get(key)
+            if range_column and value:
+                column, operator = range_column
+                clauses.append(f"{column} {operator} '{self._escape(value)}'")
+                continue
+            if not column:
+                logger.warning("PDL search: ignoring unsupported filter %r", key)
+                continue
+            if isinstance(value, (list, tuple)):
+                escaped = [f"'{self._escape(v)}'" for v in value if v]
+                if escaped:
+                    clauses.append(f"{column} IN ({', '.join(escaped)})")
+            elif value:
+                clauses.append(f"{column} = '{self._escape(value)}'")
+        return " AND ".join(clauses)
+
+    @staticmethod
+    def _escape(value) -> str:
+        """SQL-escape a filter value: strip control chars, double single quotes."""
+        text = "".join(ch for ch in str(value) if ch >= " " and ch != "\x7f")
+        return text.replace("'", "''")
 
     def _get(self, path: str, params: dict) -> dict | None:
         try:
@@ -148,6 +237,9 @@ class PdlProvider(EnrichmentProvider):
             profile_created_at=None,  # PDL doesn't expose profile age
             location=_clean(data.get("location_name")),
             connections=connections if isinstance(connections, int) else None,
+            provider=self.name,
+            provider_person_id=_clean(data.get("id")) or _clean(data.get("pdl_id")),
+            full_name=_clean(data.get("full_name")),
             raw={
                 "provider": self.name,
                 "full_name": _clean(data.get("full_name")),

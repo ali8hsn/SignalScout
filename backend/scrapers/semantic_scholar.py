@@ -100,13 +100,16 @@ class SemanticScholarScraper:
             if normalize_name(a.get("name", "")) == key
             and 1 <= (a.get("paperCount") or 0) <= MAX_AUTHOR_PAPERS
         ]
-        return matches[0] if matches else None
+        # A same-name collision is not a confident identity match.
+        return matches[0] if len(matches) == 1 else None
 
-    def collect(self, person: Person) -> tuple[list[Signal], list[GraphEdge]]:
+    def collect(
+        self, person: Person, author: dict | None = None
+    ) -> tuple[list[Signal], list[GraphEdge]]:
         """co_authored_paper signals + co_author edges for one person. Fail-soft."""
         if not self.has_real_name(person):
             return [], []
-        author = self.find_author(person.name)
+        author = author or self.find_author(person.name)
         if not author or not author.get("authorId"):
             return [], []
 
@@ -133,7 +136,11 @@ class SemanticScholarScraper:
                     signal_strength=0.6, source="semantic_scholar",
                     source_url=paper.get("url") or author.get("url") or "",
                     summary=f'Co-authored "{title[:80]}" ({year or "n.d."}) with {len(coauthors)} other{"s" if len(coauthors) != 1 else ""}',
-                    raw_data={"author_id": author["authorId"], "coauthors": coauthors[:10]},
+                    raw_data={
+                        "author_id": author["authorId"],
+                        "coauthors": coauthors[:10],
+                        "year": year,
+                    },
                 )
             )
             for coauthor in coauthors[: self.max_coauthors_per_paper]:

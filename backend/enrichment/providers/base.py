@@ -62,14 +62,39 @@ class EnrichmentResult:
     profile_created_at: str | None = None
     location: str | None = None
     connections: int | None = None
+    # Identity/provenance — populated for search results so the discovery lane can
+    # dedupe on a stable provider key and create a real named person. On one-person
+    # enrichment these may be None.
+    provider: str | None = None            # provenance: "pdl" | "coresignal"
+    provider_person_id: str | None = None  # stable per-provider record id
+    full_name: str | None = None           # real name from the provider record
     raw: dict = field(default_factory=dict)  # slim provider payload for evidence/debugging
+
+
+@dataclass
+class ProviderSearchPage:
+    """One resumable provider-search page.
+
+    ``api_requests`` counts HTTP requests, while ``credit_units`` records the
+    adapter's conservative billing unit. They are deliberately separate from
+    returned records because providers do not bill every endpoint identically.
+    """
+
+    results: list[EnrichmentResult] = field(default_factory=list)
+    next_cursor: str | None = None
+    exhausted: bool = True
+    api_requests: int = 0
+    returned_records: int = 0
+    credit_units: int = 0
 
 
 class EnrichmentProvider(ABC):
     name: str = "provider"
-    # Set by adapters on every enrich_person call: None after a definitive answer
-    # (match or clean no-match, safe to cache), an error message after auth /
-    # network / server failures (must NOT be cached as a 30-day miss).
+    supported_search_filters: frozenset[str] = frozenset()
+    search_credit_overhead: int = 0
+    # Set by adapters on every enrich_person / search_people call: None after a
+    # definitive answer (match or clean no-match, safe to cache), an error message
+    # after auth / network / server failures (must NOT be cached as a 30-day miss).
     last_error: str | None = None
 
     @abstractmethod
@@ -77,5 +102,29 @@ class EnrichmentProvider(ABC):
         """One-person lookup. None = no confident match (or API failure)."""
 
     @abstractmethod
-    def search_people(self, filters: dict) -> list[EnrichmentResult]:
-        """Filter-based search. Empty list on no match or failure."""
+    def search_people(self, filters: dict, size: int = 10) -> list[EnrichmentResult]:
+        """Allowlisted filter-based search. Results carry provider identity, real
+        name, LinkedIn URL, education, positions, and location. Empty list on no
+        match or failure; `size` caps returned records."""
+
+    def search_page(
+        self,
+        filters: dict,
+        size: int = 10,
+        cursor: str | None = None,
+    ) -> ProviderSearchPage:
+        """Resumable search contract.
+
+        Legacy/test adapters get a safe one-page implementation. Production
+        adapters override this with their provider-appropriate cursor/offset.
+        """
+        if cursor:
+            return ProviderSearchPage()
+        results = self.search_people(filters, size=size)
+        return ProviderSearchPage(
+            results=results,
+            exhausted=True,
+            api_requests=1,
+            returned_records=len(results),
+            credit_units=len(results),
+        )

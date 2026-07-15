@@ -1,0 +1,113 @@
+[
+  {
+    "person_id": "74fc0da7-7e6f-48da-9ed7-c848f78c1c97",
+    "name": "Caelin Sutch",
+    "source_bucket": "github_cross_source",
+    "why_now": "In May 2026, Caelin co-published the National Design Studio's public account of making AI useful in high-friction government services, after moving onto its technical staff.",
+    "primary_evidence_url": "https://ndstudio.gov/posts/making-ai-useful",
+    "signal_date": "2026-05-03",
+    "signal_type": "current_public_work",
+    "signal_category": "code",
+    "signal_source": "public_web",
+    "signal_summary": "Co-authored National Design Studio's May 2026 public note on applying AI to hard-to-use government systems."
+  },
+  {
+    "person_id": "616d623a-a378-4204-b655-63e56b3e5f72",
+    "name": "Simo Ryu",
+    "source_bucket": "github_cross_source",
+    "why_now": "Simo's public GitHub showed fresh July 2026 activity alongside a sustained body of minimal, widely adopted diffusion-model implementations.",
+    "primary_evidence_url": "https://github.com/cloneofsimo"
+  },
+  {
+    "person_id": "484976e9-62fc-46d4-8fe5-5870eb8e8bf2",
+    "name": "Louis Castricato",
+    "source_bucket": "github_cross_source",
+    "why_now": "Overworld published Waypoint 1.5 in June 2026, putting Louis on a small team shipping a real-time interactive video world model for consumer hardware.",
+    "primary_evidence_url": "https://over.world/waypoint-1.5",
+    "signal_date": "2026-06-01",
+    "signal_type": "current_public_work",
+    "signal_category": "code",
+    "signal_source": "public_web",
+    "signal_summary": "Named on the Waypoint 1.5 team shipping an interactive video world model for consumer hardware."
+  },
+  {
+    "person_id": "1aa347ec-32ea-4de7-bd6b-f3aab3d1af0c",
+    "name": "Katherine \"Kati\" Michel",
+    "source_bucket": "github_cross_source",
+    "why_now": "Kati's public GitHub showed continued output in July 2026 across 80-plus repositories, building on years of hands-on open-source maintainership.",
+    "primary_evidence_url": "https://github.com/KatherineMichel"
+  },
+  {
+    "person_id": "c7a8d5f8-4d0f-4be7-92be-7fe396adc5ae",
+    "name": "Mete Ismayilzada",
+    "source_bucket": "provider_discovered",
+    "why_now": "Mete began a Microsoft Research internship in April 2026 on LLMs for scientific discovery while continuing his EPFL computational-creativity PhD.",
+    "primary_evidence_url": "https://linkedin.com/in/mismayilzada",
+    "github_username": "mismayil",
+    "personal_site": "https://www.mete.is/"
+  },
+  {
+    "person_id": "c3a8f075-9630-4324-ba4b-0f995d71df6c",
+    "name": "Ashverya Sheth",
+    "source_bucket": "provider_discovered",
+    "why_now": "Ashverya moved into a Zoox technical program internship in May 2026 while pursuing Wharton's AI-for-business MBA track.",
+    "primary_evidence_url": "https://linkedin.com/in/ashverya"
+  },
+  {
+    "person_id": "87ef165c-2320-46ea-8176-812d4fe49a99",
+    "name": "Siddharth Uppal",
+    "source_bucket": "provider_discovered",
+    "why_now": "Siddharth began investing at BMW i Ventures in January 2026, working across AI, enterprise software, mobility, robotics, and industrial technology.",
+    "primary_evidence_url": "https://linkedin.com/in/siddharth-uppal"
+  },
+  {
+    "person_id": "manual-sawit-koseeyaumporn",
+    "name": "Sawit Koseeyaumporn",
+    "source_bucket": "manual_public",
+    "why_now": "Sawit won the 2025 BDI AI and data hackathon with a five-person student team and is now publicly shipping machine-learning projects from Bangkok.",
+    "primary_evidence_url": "https://www.dailynews.co.th/news/5100916/",
+    "github_username": "Celesca",
+    "linkedin_url": "https://www.linkedin.com/in/sawit-koseeyaumporn-418941256/",
+    "school": "King Mongkut's University of Technology Thonburi",
+    "current_location": "Bangkok, Thailand",
+    "area": "AI Engineering",
+    "signal_date": "2025-09-01",
+    "signal_type": "hackathon_win",
+    "signal_category": "competition",
+    "signal_source": "public_web",
+    "signal_summary": "Named by public competition coverage as a member of the student team that won the 2025 BDI AI and Data Innovation hackathon."
+  },
+  {
+    "person_id": "manual-jeroen-op-de-beek",
+    "name": "Jeroen Op de Beek",
+    "source_bucket": "manual_public",
+    "why_now": "Jeroen's TU Delft team won the February 2026 ICPC Europe Championship, defending its title and qualifying for the November 2026 World Finals.",
+    "primary_evidence_url": "https://www.tudelft.nl/en/2026/eemcs/tu-delft-students-win-european-programming-championship-once-again",
+    "github_username": "Jeroenodb",
+    "linkedin_url": "https://www.linkedin.com/in/jeroen-op-de-beek-069858174/",
+    "school": "Delft University of Technology",
+    "area": "Competitive Programming",
+    "signal_date": "2026-02-08",
+    "signal_type": "competition_win",
+    "signal_category": "competition",
+    "signal_source": "public_web",
+    "signal_summary": "TU Delft named Jeroen on its team that won the 2026 ICPC Europe Championship and qualified for the World Finals."
+  },
+  {
+    "person_id": "manual-toni-brajko",
+    "name": "Toni Brajko",
+    "source_bucket": "manual_public",
+    "why_now": "Toni's University of Zagreb team placed seventh among 140 teams at the September 2025 ICPC World Finals, earning silver and the European title.",
+    "primary_evidence_url": "https://hsin.hr/icpc_finale_2025/izvjestaj.php",
+    "github_username": "tonc27",
+    "linkedin_url": "https://www.linkedin.com/in/toni-brajko-25905b259/",
+    "school": "University of Zagreb",
+    "current_location": "Zagreb, Croatia",
+    "area": "Competitive Programming",
+    "signal_date": "2025-09-05",
+    "signal_type": "competition_medal",
+    "signal_category": "competition",
+    "signal_source": "public_web",
+    "signal_summary": "The Croatian Informatics Association named Toni on Zagreb's seventh-place, silver-medal ICPC World Finals team."
+  }
+]

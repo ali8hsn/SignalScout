@@ -91,8 +91,8 @@ curl https://<your-domain>/api/health     # → {"status":"ok","db":"postgres"}
 curl https://<your-domain>/api/overview   # → backtest stats + discovery counts
 ```
 
-Open the root URL in a browser — the full frontend (Discover / Backtest / Digest) should load
-with all migrated data, no login.
+Open the root URL in a private browser and confirm the public Cory-facing Discover UI loads only
+the reviewed launch cohort without any operator controls.
 
 ## 8. Configure Resend and the daily digest cron
 
@@ -106,7 +106,7 @@ with all migrated data, no login.
 2. Railway cron jobs execute commands. Project canvas → **+ Create** → **Empty Service**, name it
    `digest-cron`, connect it to the same GitHub repo, and copy the app service variables
    (`DATABASE_URL`, `RESEND_API_KEY`, `DIGEST_FROM_EMAIL`, and `PUBLIC_BASE_URL`).
-3. Service **Settings** → set its start command to `python scripts/send_digests.py`.
+3. Service **Settings** → set its start command to `python scripts/run_digest_cron.py`.
 4. Set **Cron Schedule** to `0 15 * * *` (15:00 UTC = 8:00 AM PDT). Railway schedules in UTC
    and does not follow DST, so this runs at 7:00 AM PST in winter; use `0 16 * * *` then if
    8 AM local delivery matters. The command sends daily subscriptions every run and weekly
@@ -127,8 +127,8 @@ curl -X POST \
   "https://<your-domain>/api/digest/cron?recipient=you@example.com"
 ```
 
-For a local command-path preview, run
-`python scripts/send_digests.py --dry-run --recipient you@example.com`.
+For a local exact preview, call `GET /api/digest/preview?email=you@example.com` with
+`Authorization: Bearer $ADMIN_SECRET`. The bearer is server-side only and never bundled in React.
 
 ## Troubleshooting
 
@@ -149,6 +149,10 @@ Required for hosted storage and links:
 - `PUBLIC_BASE_URL` — generated Railway HTTPS origin used in feedback/unsubscribe links.
 - `CRON_SECRET` — protects the manual cron endpoint. Generate locally with
   `openssl rand -hex 32`, then store only the output in Railway Variables.
+- `APP_ENV=production` — enables fail-closed operator configuration.
+- `ADMIN_SECRET` — server-side bearer for review, preview, test-email, and operator endpoints;
+  generate with `openssl rand -hex 32` and never place it in frontend code.
+- `OWNER_TEST_EMAIL` — explicit owner-only address permitted for production test sends.
 
 Required for live discovery:
 
@@ -158,14 +162,24 @@ Required for live discovery:
 - `DISCOVERY_SEED_LIMIT` — optional number of seed accounts per run; default `4`.
 - `DISCOVERY_MAX_PER_SEED` — optional expansion cap per seed; default `30`.
 
-Choose one licensed enrichment provider:
+Licensed enrichment runs a PDL-first, Coresignal-fallback chain plus an
+independent provider-search discovery lane. A provider is used whenever its key
+is present; missing keys degrade to a no-op.
 
-- `ENRICHMENT_PROVIDER` — either `pdl` or `coresignal`; default `pdl`.
-- `PDL_API_KEY` — People Data Labs person enrichment key. Obtain it from the
-  [PDL dashboard](https://dashboard.peopledatalabs.com/).
-- `CORESIGNAL_API_KEY` — Coresignal employee API key. Obtain access from
-  [Coresignal self-service](https://dashboard.coresignal.com/sign-up).
-- `DAILY_ENRICHMENT_BUDGET` — maximum licensed-provider calls per UTC day; default `100`.
+- `ENRICHMENT_PROVIDER` — legacy single-provider hint (`pdl`/`coresignal`); the
+  chain is PDL-first regardless. Default `pdl`.
+- `PDL_API_KEY` — People Data Labs key (primary enricher + lead search lane).
+  Obtain it from the [PDL dashboard](https://dashboard.peopledatalabs.com/).
+- `CORESIGNAL_API_KEY` — Coresignal employee API key (independent search + PDL
+  no-match fallback). [Coresignal self-service](https://dashboard.coresignal.com/sign-up).
+- `PDL_MONTHLY_CAP` — PDL lookups/month (free tier ~`100`); default `100`.
+- `PDL_SEARCH_SPLIT` — fraction of the PDL monthly cap reserved for the
+  provider-search lane (search-first); default `0.7`.
+- `PROVIDER_PER_RUN_CAP` — max fresh provider lookups per run/process; default `100`.
+- `CORESIGNAL_DAILY_CAP` — Coresignal's separate daily cap (search + fallback);
+  default `20`.
+- `DAILY_ENRICHMENT_BUDGET` — legacy global daily counter, superseded by the
+  provider-scoped budgets above; default `100`.
 
 Required for real email delivery:
 
@@ -175,8 +189,8 @@ Required for real email delivery:
   `Signal Scout <digest@example.com>`. Set up the domain in
   [Resend Domains](https://resend.com/domains).
 
-`SIGNAL_SCOUT_DB` is local-only and must not be set on Railway. Missing provider/email keys
-degrade safely: enrichment skips and email remains preview-only.
+`SIGNAL_SCOUT_DB` is local-only and must not be set on Railway. Do not set provider keys for this
+release: provider allocations are exhausted. Missing email keys keep delivery preview-only.
 
 ## Five-minute pre-Cory QA
 

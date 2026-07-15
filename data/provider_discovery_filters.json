@@ -1,0 +1,22 @@
+{
+  "_note": "Provider-search targets use adapter-allowlisted fields only. PDL supports dated education, technical majors, title roles/levels, and schools. Coresignal's configured lane uses only its documented school/title/first-seen fields. Fellowship/program names are intentionally omitted because neither adapter currently exposes a verified dedicated filter.",
+  "max_results_per_filter": 10,
+  "pages_per_filter_per_run": 1,
+  "max_new_people_per_run": 25,
+  "pdl_filters": [
+    { "label": "MIT recent technical education", "school": "massachusetts institute of technology", "major": ["computer science", "electrical engineering", "mathematics", "physics"], "education_end_date_gte": "2023-01-01" },
+    { "label": "Stanford recent technical education", "school": "stanford university", "major": ["computer science", "electrical engineering", "mathematics", "physics"], "education_end_date_gte": "2023-01-01" },
+    { "label": "Berkeley recent technical education", "school": "university of california, berkeley", "major": ["computer science", "electrical engineering", "mathematics", "physics"], "education_end_date_gte": "2023-01-01" },
+    { "label": "CMU recent technical education", "school": "carnegie mellon university", "major": ["computer science", "robotics", "machine learning", "electrical engineering"], "education_end_date_gte": "2023-01-01" },
+    { "label": "Waterloo recent technical education", "school": "university of waterloo", "major": ["computer science", "software engineering", "mechatronics engineering", "mathematics"], "education_end_date_gte": "2023-01-01" },
+    { "label": "Early-career engineering builders", "title_role": ["engineering"], "title_level": ["entry", "training"] },
+    { "label": "Early-career research builders", "title_role": ["research"], "title_level": ["entry", "training"] }
+  ],
+  "coresignal_filters": [
+    { "label": "MIT software builders", "school": "Massachusetts Institute of Technology", "title": "Software Engineer" },
+    { "label": "Stanford software builders", "school": "Stanford University", "title": "Software Engineer" },
+    { "label": "Berkeley software builders", "school": "University of California, Berkeley", "title": "Software Engineer" },
+    { "label": "CMU research builders", "school": "Carnegie Mellon University", "title": "Researcher" },
+    { "label": "Waterloo software builders", "school": "University of Waterloo", "title": "Software Engineer" }
+  ]
+}

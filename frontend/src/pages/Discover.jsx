@@ -5,16 +5,18 @@ import CandidateTable from '../components/CandidateTable.jsx';
 import DigestSignup from '../components/DigestSignup.jsx';
 import EvidencePanel from '../components/EvidencePanel.jsx';
 import PipelineProgress from '../components/PipelineProgress.jsx';
+import SourceMix from '../components/SourceMix.jsx';
 
 const POLL_MS = 1200;
 
-export default function Discover() {
+export default function Discover({ coryMode = false }) {
   const [candidates, setCandidates] = useState([]);
   const [index, setIndex] = useState(0);
   const [browseAll, setBrowseAll] = useState(true);
   const [evidenceId, setEvidenceId] = useState(null);
   const [cohort, setCohort] = useState('discovery');
   const [loadState, setLoadState] = useState('loading');
+  const [sourceMix, setSourceMix] = useState(null);
 
   const [jobStatus, setJobStatus] = useState(null);
   const [running, setRunning] = useState(false);
@@ -35,9 +37,17 @@ export default function Discover() {
     });
   };
 
+  const loadSourceMix = () => {
+    api.overview()
+      .then((d) => setSourceMix(d.source_mix || null))
+      .catch(() => {});
+  };
+
   useEffect(() => {
     loadCandidates(cohort).catch(() => {});
   }, [cohort]);
+
+  useEffect(loadSourceMix, []);
 
   useEffect(() => () => clearInterval(pollRef.current), []);
 
@@ -47,6 +57,7 @@ export default function Discover() {
     const fresh = await loadCandidates('discovery').catch(() => []);
     setNewIds(new Set(fresh.filter((c) => !priorIds.has(c.id)).map((c) => c.id)));
     setBrowseAll(true);
+    loadSourceMix();
   };
 
   const runDiscovery = async () => {
@@ -91,9 +102,9 @@ export default function Discover() {
 
   return (
     <div>
-      <DigestSignup />
+      {!coryMode && <DigestSignup />}
       <div className="flex items-center justify-between mb-6">
-        <div className="flex gap-1">
+        {!coryMode && <div className="flex gap-1">
           {[['discovery', 'DISCOVERIES'], ['founder', 'GROUND TRUTH']].map(([value, label]) => (
             <button
               key={value}
@@ -105,15 +116,15 @@ export default function Discover() {
               {label}
             </button>
           ))}
-        </div>
+        </div>}
         <div className="flex items-center gap-4">
-          <button
+          {!coryMode && <button
             onClick={runDiscovery}
             disabled={running}
             className="bg-olive hover:bg-olive-dark disabled:bg-ink-faint text-cream font-mono text-[10px] tracking-widest px-4 py-1.5 rounded-sm transition-colors"
           >
             {running ? 'RUNNING…' : 'RUN DISCOVERY'}
-          </button>
+          </button>}
           <button
             onClick={() => setBrowseAll(!browseAll)}
             className="font-mono text-xs text-olive hover:text-olive-dark"
@@ -123,7 +134,7 @@ export default function Discover() {
         </div>
       </div>
 
-      {runError && (
+      {!coryMode && runError && (
         <div role="alert" className="border border-red-300 bg-red-50 rounded-sm px-4 py-3 mb-4 text-center">
           <p className="text-sm text-red-700">{runError}</p>
           <button onClick={runDiscovery} className="font-mono text-[10px] tracking-widest text-red-700 underline mt-1">
@@ -131,7 +142,8 @@ export default function Discover() {
           </button>
         </div>
       )}
-      <PipelineProgress status={jobStatus} />
+      {!coryMode && <PipelineProgress status={jobStatus} />}
+      {cohort === 'discovery' && <SourceMix mix={sourceMix} />}
 
       {loadState === 'loading' ? (
         <div className="bg-card border border-line rounded-md px-6 py-10 text-center">
@@ -157,9 +169,12 @@ export default function Discover() {
         </div>
       ) : browseAll ? (
         <CandidateTable
+          key={cohort}
           candidates={candidates}
           onSelect={(c) => setEvidenceId(c.id)}
           highlightIds={newIds}
+          defaultView={coryMode || cohort !== 'discovery' ? 'all' : 'provider'}
+          defaultUnknownsOnly={!coryMode}
         />
       ) : (
         <>

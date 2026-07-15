@@ -21,6 +21,7 @@ from backend.enrichment.providers.base import (
     EnrichmentQuery,
     EnrichmentResult,
     Position,
+    ProviderSearchPage,
     normalize_date,
 )
 
@@ -28,9 +29,22 @@ logger = logging.getLogger(__name__)
 
 API = "https://api.coresignal.com/cdapi/v2"
 
+# Allowlisted search filters: our filter key -> Coresignal employee_base filter.
+# Only these documented filters can reach the request body.
+SEARCH_FILTERS = {
+    "school": "education_institution_name",
+    "title": "active_experience_title",
+    "location": "location",
+    "country": "location_country",
+    "created_at_gte": "created_at_gte",  # first-seen lower bound (recent profiles)
+}
+MAX_SEARCH_SIZE = 100
+
 
 class CoresignalProvider(EnrichmentProvider):
     name = "coresignal"
+    supported_search_filters = frozenset(SEARCH_FILTERS)
+    search_credit_overhead = 1
 
     def __init__(self, api_key: str, session: requests.Session | None = None):
         self.session = session or requests.Session()
@@ -60,13 +74,61 @@ class CoresignalProvider(EnrichmentProvider):
             return None
         return self._map_person(record)
 
-    def search_people(self, filters: dict) -> list[EnrichmentResult]:
+    def search_people(self, filters: dict, size: int = 10) -> list[EnrichmentResult]:
+        return self.search_page(filters, size=size).results
+
+    def search_page(
+        self,
+        filters: dict,
+        size: int = 10,
+        cursor: str | None = None,
+    ) -> ProviderSearchPage:
+        """Independent Coresignal search. `filters` keys are ALLOWLISTED
+        (SEARCH_FILTERS); unknown keys are ignored so no arbitrary filter reaches
+        the request. The checkpoint is an offset into the stable returned ID
+        list, so completed collect pages are never collected again."""
+        self.last_error = None
+        allowed = self._build_filters(filters)
+        if not allowed:
+            return ProviderSearchPage()
+        limit = max(1, min(size, MAX_SEARCH_SIZE))
+        try:
+            offset = max(0, int(cursor or 0))
+        except (TypeError, ValueError):
+            offset = 0
+        ids = self._search(allowed)
+        if self.last_error:
+            return ProviderSearchPage(api_requests=1)
+        selected = ids[offset:offset + limit]
         results = []
-        for record_id in self._search(filters)[:10]:
+        for record_id in selected:
             record = self._collect(record_id)
             if record:
                 results.append(self._map_person(record))
-        return results
+        has_more = offset + len(selected) < len(ids)
+        return ProviderSearchPage(
+            results=results,
+            next_cursor=str(offset + len(selected)) if has_more else None,
+            exhausted=not has_more,
+            # One filter request plus one collect request per selected ID.
+            api_requests=1 + len(selected),
+            returned_records=len(results),
+            # Conservatively account collect attempts as usage; this is not
+            # presented as a statement about an account's invoice.
+            credit_units=1 + len(selected),
+        )
+
+    @staticmethod
+    def _build_filters(filters: dict) -> dict:
+        allowed = {}
+        for key, value in (filters or {}).items():
+            column = SEARCH_FILTERS.get(key)
+            if not column:
+                logger.warning("Coresignal search: ignoring unsupported filter %r", key)
+                continue
+            if value:
+                allowed[column] = value
+        return allowed
 
     def _search(self, filters: dict) -> list:
         try:
@@ -140,6 +202,9 @@ class CoresignalProvider(EnrichmentProvider):
             profile_created_at=normalize_date(data.get("created_at") or data.get("created")),
             location=data.get("location") or data.get("location_full"),
             connections=connections if isinstance(connections, int) else None,
+            provider=self.name,
+            provider_person_id=str(data["id"]) if data.get("id") is not None else None,
+            full_name=data.get("full_name") or data.get("name"),
             raw={
                 "provider": self.name,
                 "id": data.get("id"),

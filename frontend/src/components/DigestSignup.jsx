@@ -3,7 +3,7 @@ import { api } from '../api/client.js';
 
 const EMPTY_FORM = {
   email: '',
-  frequency: 'daily',
+  frequency: 'weekly',
   signalInterests: '',
   seedAccounts: '',
 };
@@ -25,7 +25,6 @@ export default function DigestSignup() {
     try {
       const result = await api.sendTestDigest({
         email: currentSubscription.email,
-        token: currentSubscription.subscriber_token,
       });
       setStatus('sent');
       setMessage(result.message);
@@ -158,8 +157,8 @@ export default function DigestSignup() {
               disabled={busy}
               className="w-full bg-cream border border-line rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-olive"
             >
-              <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
+              <option value="daily">Daily</option>
             </select>
           </label>
         </div>
