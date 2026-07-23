@@ -30,19 +30,20 @@ logger = logging.getLogger(__name__)
 
 API = "https://api.coresignal.com/cdapi/v2"
 
-# Allowlisted search filters: our filter key -> Coresignal employee_base filter.
-# Only these documented filters can reach the request body.
+# Allowlisted search filters: our filter key -> Coresignal employee_base v2
+# `search/filter` column. Only these documented columns can reach the request
+# body. Names verified against
+# https://docs.coresignal.com/employee-api/base-employee-api/endpoints/search-filters
+# (using the wrong keys — e.g. `active_experience_*`, `location_country`, or a
+# founded-year column that doesn't exist — makes the endpoint return HTTP 422).
 SEARCH_FILTERS = {
     "school": "education_institution_name",
-    "title": "active_experience_title",
+    "title": "experience_title",  # supports AND/OR/* and "\"exact\""
     "location": "location",
-    "country": "location_country",
+    "country": "country",  # supports OR + phrase grouping, e.g. "(United Kingdom) OR Germany"
     "created_at_gte": "created_at_gte",  # first-seen lower bound (recent profiles)
-    # Founder-recipe fields — verify exact keys against the live employee_base
-    # schema before relying on them; unsupported keys are silently dropped.
-    "previous_company": "experience_company_name",  # e.g. FAANG-to-startup match
-    "company_size_lte": "active_experience_company_employees_count_lte",
-    "company_founded_gte": "active_experience_company_founded_year_gte",
+    "previous_company": "experience_company_name",  # current/previous workplace (OR-joined)
+    "company_size_lte": "experience_company_employees_count_lte",
 }
 MAX_SEARCH_SIZE = 100
 
@@ -163,6 +164,11 @@ class CoresignalProvider(EnrichmentProvider):
             if not column:
                 logger.warning("Coresignal search: ignoring unsupported filter %r", key)
                 continue
+            # Coresignal string filters take multiple values as an OR-joined
+            # string (e.g. "Google OR Meta"), NOT a JSON array — a list body
+            # value is rejected with HTTP 422.
+            if isinstance(value, (list, tuple)):
+                value = " OR ".join(str(item) for item in value if item)
             if value:
                 allowed[column] = value
         return allowed
@@ -227,7 +233,9 @@ class CoresignalProvider(EnrichmentProvider):
         filters) for founder/co-founder/CEO titles."""
         self.last_error = None
         allowed = self._build_filters(title_filters)
-        allowed["active_experience_company_id"] = company_id
+        # Documented join key is `experience_company_id`; scope to current roles.
+        allowed["experience_company_id"] = company_id
+        allowed["active_experience"] = True
         ids = self._search(allowed)
         if not ids:
             return []

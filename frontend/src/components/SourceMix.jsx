@@ -5,8 +5,9 @@ const SOURCE_COLORS = {
   github: '#6B6B32',
   pdl: '#4E5D3A',
   coresignal: '#7A6B4E',
+  exa: '#8A7A2E',
   semantic_scholar: '#5D6B6B',
-  devpost: '#8A7A2E',
+  devpost: '#6B4E5D',
   graph: '#75664D',
 };
 

@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { api } from './api/client.js';
-import Backtest from './pages/Backtest.jsx';
-import Digest from './pages/Digest.jsx';
-import Discover from './pages/Discover.jsx';
-import Pipeline from './pages/Pipeline.jsx';
+
+// Lazy-load each tab so the first Discover paint only ships Discover's chunk;
+// Backtest/Digest/Pipeline load on demand when their tab is first opened.
+const Discover = lazy(() => import('./pages/Discover.jsx'));
+const Backtest = lazy(() => import('./pages/Backtest.jsx'));
+const Digest = lazy(() => import('./pages/Digest.jsx'));
+const Pipeline = lazy(() => import('./pages/Pipeline.jsx'));
 
 const TABS = ['Discover', 'Backtest', 'Digest', 'Pipeline'];
 
@@ -47,10 +50,14 @@ export default function App() {
         </div>
       </header>
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-        {tab === 'Discover' && <Discover />}
-        {tab === 'Backtest' && <Backtest />}
-        {tab === 'Digest' && <Digest operatorMode />}
-        {tab === 'Pipeline' && <Pipeline />}
+        <Suspense
+          fallback={<p className="font-mono text-xs text-ink-faint">Loading…</p>}
+        >
+          {tab === 'Discover' && <Discover />}
+          {tab === 'Backtest' && <Backtest />}
+          {tab === 'Digest' && <Digest />}
+          {tab === 'Pipeline' && <Pipeline />}
+        </Suspense>
       </main>
     </div>
   );

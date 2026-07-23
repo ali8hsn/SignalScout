@@ -152,15 +152,14 @@ class DiscoveryRecipeService:
     def _run(self, recipe_id: str, dry_run: bool, override_limit: int | None) -> dict:
         recipe = self._get(recipe_id)
         result = self.expander.run_recipe(recipe, dry_run=dry_run, override_limit=override_limit)
-        # Only advance the schedule when the provider was actually reached. A
-        # missing provider key or an exhausted budget produces an empty result;
-        # advancing last_run there would silently skip the recipe's next window.
-        reached_provider = bool(
-            result.attempted
-            or result.credit_units
-            or result.created
-            or result.returned_records
-        )
+        # Only advance the schedule when the provider was actually reached AND the
+        # run wasn't purely a provider error. A missing key or exhausted budget
+        # produces an empty result; a 422/5xx error produces `errors` with nothing
+        # created — advancing last_run in either case would silently skip the
+        # recipe's next window while it's still broken. A run that produced real
+        # output still advances even if a later page errored (partial success).
+        produced = bool(result.created or result.returned_records or result.credit_units)
+        reached_provider = produced or (bool(result.attempted) and not result.errors)
         if not dry_run and reached_provider:
             self.recipes.set_last_run(
                 recipe_id, datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -178,6 +177,7 @@ class DiscoveryRecipeService:
             "review": result.review,
             "merged": result.merged,
             "duplicates": result.duplicates,
+            "errors": result.errors,
             "rejected": result.rejected,
             "rejection_reasons": result.rejection_reasons,
             "credit_units": result.credit_units,

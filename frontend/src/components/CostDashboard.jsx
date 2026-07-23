@@ -1,6 +1,4 @@
-function providerLabel(provider) {
-  return provider === 'pdl' ? 'PDL' : provider === 'coresignal' ? 'Coresignal' : provider;
-}
+import { sourceLabel } from './SignalBadge.jsx';
 
 export default function CostDashboard({ summary }) {
   if (!summary) {
@@ -19,7 +17,7 @@ export default function CostDashboard({ summary }) {
       <div className="grid sm:grid-cols-2 gap-3 mt-3">
         {providers.map(([provider, totals]) => (
           <div key={provider} className="border border-line rounded-sm px-4 py-3">
-            <p className="font-mono text-xs text-olive uppercase tracking-widest">{providerLabel(provider)}</p>
+            <p className="font-mono text-xs text-olive uppercase tracking-widest">{sourceLabel(provider)}</p>
             <p className="font-display text-2xl mt-1">
               {totals.search_credits_used}
               <span className="text-sm text-ink-faint"> used</span>

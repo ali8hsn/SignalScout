@@ -38,6 +38,7 @@ Defines `BaseRepository`, the shared superclass every concrete repository extend
   - `BaseRepository.conn` (property) — returns `self.db.conn`, the active connection.
   - `BaseRepository.dumps(value) -> str` — JSON-serializes a value (`ensure_ascii=False`) for storage in a TEXT column.
   - `BaseRepository.loads(text, default)` — JSON-deserializes a TEXT column value, returning `default` if the text is empty/None.
+  - `chunked(items, size)` (module function) — yields successive `size`-length slices, used by the `for_people` batch loaders to keep `IN (...)` parameter counts under SQLite's per-statement variable limit.
 
 ## backend/db/repositories/candidate_reviews.py
 Manages the `candidate_reviews` table, which holds human review decisions (pending/approved/rejected) on discovery candidates, mapping rows to/from the `CandidateReview` domain dataclass.
@@ -45,6 +46,7 @@ Manages the `candidate_reviews` table, which holds human review decisions (pendi
 - `utc_now() -> str` — returns the current UTC time as an ISO-8601 string with second precision.
 - `CandidateReviewRepository` — CRUD/upsert access to `candidate_reviews`.
   - `CandidateReviewRepository.get(person_id)` — fetches a single review row by `person_id`.
+  - `CandidateReviewRepository.for_people(person_ids)` — batch variant of `get`: returns a `{person_id: CandidateReview}` map (chunked `IN` query), omitting people without a review.
   - `CandidateReviewRepository.all(state=None)` — lists all reviews, optionally filtered by `state`, ordered by `updated_at` descending.
   - `CandidateReviewRepository.approved_contactable()` — lists approved reviews with `contactable = 1`, ordered by `approved_at` then `person_id`.
   - `CandidateReviewRepository.upsert(person_id, state, why_now, notes, source_bucket, contactable, primary_evidence_url, reviewer)` — validates `state`/`source_bucket` against allowed sets, sets/clears `approved_at` based on state transitions, and upserts the row via `ON CONFLICT(person_id)`.
@@ -105,15 +107,17 @@ Manages the `graph_edges` table, which stores directed relationships between per
 - `GraphEdgeRepository` — save/query access to `graph_edges`.
   - `GraphEdgeRepository.save(edge)` — upserts (`INSERT OR REPLACE`) a single edge; does not commit.
   - `GraphEdgeRepository.save_many(edges)` — saves a list of edges and commits once at the end.
-  - `GraphEdgeRepository.for_person(person_id, before=None)` — returns all edges touching a person as either source or target, optionally filtered to edges observed before a given date.
+  - `GraphEdgeRepository.for_person(person_id, before=None)` — returns all edges touching a person as either source or target, optionally filtered to edges observed on or before a given date (inclusive, so same-day-as-breakout edges count in the backtest).
+  - `GraphEdgeRepository.for_people(person_ids)` — batch variant of `for_person`: one chunked query returns a `{person_id: [GraphEdge]}` map grouped under each requested endpoint (an edge between two requested people appears under both, without cross-chunk double-counting).
   - `GraphEdgeRepository.all()` — returns every edge row.
   - `GraphEdgeRepository._to_model(row) -> GraphEdge` — converts a DB row into a `GraphEdge`, decoding the JSON `metadata` column.
 
 ## backend/db/repositories/page_views.py
 Manages the `page_views` table, a privacy-minimal log of page path + referrer + timestamp used for basic traffic counting.
 
-- `PageViewRepository` — write/count access to `page_views`.
-  - `PageViewRepository.record(path, referrer=None)` — inserts a new page-view row with a generated UUID and current UTC timestamp, returning the view id.
+- `PageViewRepository` — write/count access to `page_views`; caps retained rows (`MAX_ROWS = 50_000`) since the table is append-only from an open public endpoint.
+  - `PageViewRepository.record(path, referrer=None)` — inserts a new page-view row with a generated UUID and current UTC timestamp, returning the view id; every `PRUNE_INTERVAL` (500) inserts it triggers `prune()` to keep growth bounded.
+  - `PageViewRepository.prune(max_rows=MAX_ROWS) -> int` — deletes all but the most recent `max_rows` rows (by `viewed_at`), returning the number removed.
   - `PageViewRepository.count() -> int` — returns the total number of recorded page views.
 
 ## backend/db/repositories/persons.py
@@ -128,12 +132,14 @@ Manages the `persons` table (the core entity: candidate/tracked individuals with
   - `PersonRepository.find_by_name(name)` — case-insensitive lookup by exact name match.
   - `PersonRepository.find_by_github(username)` — case-insensitive lookup by GitHub username.
   - `PersonRepository.all(cohort=None)` — lists all persons, optionally filtered by cohort.
-  - `PersonRepository.update_score(person_id, score)` — updates just the `score` column for a person.
+  - `PersonRepository.update_score(person_id, score)` — updates just the `score` column for a person (commits immediately).
+  - `PersonRepository.update_scores(scores)` — persists a `{person_id: score}` map in a single transaction/commit; used by the rescore hot path instead of one commit per person.
   - `PersonRepository.delete(person_id)` — deletes a person row outright. Used by `backend/scrapers/resolve.py`'s `LeadResolver` to roll back the tentative row it saves before calling `ProviderEnricher.run()` (required because `run()` derives `Signal` rows that FK-reference `persons`, so the row must exist first) when PDL Identify doesn't confirm a match.
   - `PersonRepository._to_model(row) -> Person` — converts a DB row into a `Person`, decoding JSON `aliases`/`contact_info` columns.
   - `PersonRepository._ensure_columns()` — adds any of `EXTRA_COLUMNS` missing from the live `persons` table via `ALTER TABLE ADD COLUMN`.
   - `PersonRepository._column_names() -> set[str]` — returns the current set of column names on `persons`, via `information_schema.columns` (Postgres) or `PRAGMA table_info` (SQLite).
-  - `PersonRepository._derive_legacy_discovery_metadata()` — for pre-migration `cohort='discovery'` rows missing `discovery_origin`/`evidence_tier`/`enrichment_status`/`discovery_source`, infers and backfills those fields from `contact_info`, presence of a `provider_identities` row, and related `signals` rows (e.g. `job_change` or `linkedin_created_recently` signals imply a "verified" evidence tier); `discovery_source` is backfilled as `f"{provider}_discovery"` when `contact_info["discovered_via"]` is `"pdl"`/`"coresignal"` and the row predates the `discovery_source` column.
+  - `PersonRepository._needs_legacy_backfill()` — cheap existence check (matching exactly the rows the backfill can change) that lets `__init__` skip the full rescan on every Container build once the discovery metadata is already migrated.
+  - `PersonRepository._derive_legacy_discovery_metadata()` — returns immediately when `_needs_legacy_backfill()` is false; otherwise, for pre-migration `cohort='discovery'` rows missing `discovery_origin`/`evidence_tier`/`enrichment_status`/`discovery_source`, infers and backfills those fields from `contact_info`, presence of a `provider_identities` row, and related `signals` rows (e.g. `job_change` or `linkedin_created_recently` signals imply a "verified" evidence tier); `discovery_source` is backfilled as `f"{provider}_discovery"` when `contact_info["discovered_via"]` is `"pdl"`/`"coresignal"` and the row predates the `discovery_source` column.
 
 ## backend/db/repositories/provider_identities.py
 Two self-provisioning repositories used by provider-search discovery: `ProviderIdentityRepository` dedupes people found via paid data providers against existing `persons` (backed by `provider_identities`), and tracks pagination/outcome checkpoints per provider+filter (backed by `provider_search_checkpoints`) — this checkpoint table doubles as the recipe run-log the recipe API surfaces (see `services.md`'s `discovery_recipe_service.py`).
@@ -158,10 +164,8 @@ Manages the `signals` table, which stores discrete detected events (e.g. job cha
 - `SignalRepository` — save/query access to `signals`.
   - `SignalRepository.save(signal)` — upserts (`INSERT OR REPLACE`) a single signal; does not commit.
   - `SignalRepository.save_many(signals)` — saves a list of signals and commits once at the end.
-  - `SignalRepository.for_person(person_id, before=None)` — returns a person's signals ordered by date, optionally only those before a given date.
-  - `SignalRepository.unresolved()` — returns signals not yet linked to a person (`person_id IS NULL`).
-  - `SignalRepository.assign_person(signal_id, person_id)` — links an unresolved signal to a person by updating `person_id`; does not commit.
-  - `SignalRepository.commit()` — commits pending changes (used after `assign_person`/`save` calls that intentionally defer commit).
+  - `SignalRepository.for_person(person_id, before=None)` — returns a person's signals ordered by date, optionally only those on or before a given date (inclusive, so a signal dated exactly on a founder's breakout counts "as of breakout").
+  - `SignalRepository.for_people(person_ids)` — batch variant of `for_person`: one chunked `IN` query returns a `{person_id: [Signal]}` map (ascending signal_date), avoiding a per-person round trip.
   - `SignalRepository._to_model(row) -> Signal` — converts a DB row into a `Signal`, decoding JSON `raw_data`/`metadata` columns.
 
 ## backend/db/repositories/subscriptions.py
@@ -171,7 +175,6 @@ Three repositories covering the digest-email subscription lifecycle: `Subscriber
   - `SubscriberRepository.subscribe(email, frequency, preferences)` — creates a new `Subscriber` domain object and upserts it (`ON CONFLICT(email)` updates frequency/preferences/reactivates), returning the persisted record.
   - `SubscriberRepository.get_by_email(email)` — fetches a subscriber by normalized (trimmed, lower-cased) email.
   - `SubscriberRepository.get(subscriber_id)` — fetches a subscriber by id.
-  - `SubscriberRepository.get_by_token(token)` — fetches a subscriber by their unsubscribe token.
   - `SubscriberRepository.active(frequency=None, email=None)` — lists active subscribers, optionally filtered by frequency and/or email, ordered by creation time.
   - `SubscriberRepository.deactivate(token) -> bool` — sets `active = 0` for the subscriber matching an unsubscribe token; returns whether a row was actually updated.
   - `SubscriberRepository._to_model(row) -> Subscriber` — converts a DB row into a `Subscriber`, decoding the JSON `preferences` column.

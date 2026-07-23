@@ -109,8 +109,12 @@ Fixture-driven tests (HTTP layer mocked, providers faked; never spend real credi
   - `test_student_technical_admission_rejects_same_record_without_technical_education()` — the contrasting case: the identical record run through a `query_type="student_technical"` recipe is rejected with reason `"nontechnical_or_missing_education"` — proves `query_type` actually changes the admission outcome, not just cosmetically.
   - `test_relative_filters_computed_at_run_time()` — asserts a recipe's `relative_filters={"job_start_date_gte": 30}` reaches the provider as an absolute date (today minus 30 days), recomputed fresh on every run.
   - `test_recipe_dedupes_against_existing_github_candidate_by_name_and_school()` — asserts a recipe run against a name+school match to an existing GitHub-origin person merges into that person (not a new insert) and marks it provider-enriched.
+  - `test_recipe_does_not_merge_same_name_without_shared_school()` — asserts a same-name match where neither side has a school is NOT merged (a fresh review-tier person is created instead), guarding against collapsing two different same-named people.
   - `test_recipe_hard_caps_results_at_default_limit()` — asserts a recipe never creates more people than its `default_limit`, even when the provider returns more.
   - `test_recipe_budget_exhausted_blocks_real_run()` — asserts a recipe with `pdl_monthly_cap=0` creates nobody and never calls the provider (fail-soft budget stop, not an error).
+- `RecipeScheduleAdvanceTests` (`ChainTestBase`) — `DiscoveryRecipeService._run` schedule-advance rules
+  - `test_last_run_not_advanced_on_provider_error()` — asserts a run against an erroring provider reports `errors >= 1`, creates nobody, is `reached_provider=False`, and leaves `last_run` unset so the recipe stays due.
+  - `test_last_run_advances_on_successful_run()` — asserts a producing run reports zero errors, creates at least one person, is `reached_provider=True`, and sets `last_run`.
 - `FakeCompanyFirstProvider` — `FakeProvider` subclass adding `search_companies`/`search_company_employees` (with call-count tracking) for testing `_run_company_first`.
 - `CompanyFirstRecipeTests` (`ChainTestBase`)
   - `test_company_first_creates_candidates_via_shared_ingest()` — asserts a `company_first` recipe run calls `search_companies` then `search_company_employees` per company, creating a person via the same `_ingest` path (`discovery_source="coresignal_discovery"`).
@@ -127,11 +131,12 @@ Fixture-driven tests (HTTP layer mocked, providers faked; never spend real credi
 - `test_pdl_search_where_is_allowlisted_and_escaped()` — asserts `PdlProvider._build_where()` escapes single quotes, converts list filters to `IN (...)`, and silently drops unknown/unallowlisted filter keys (e.g. SQL-injection-shaped values).
 - `test_pdl_escape_strips_control_chars()` — asserts `PdlProvider._escape()` correctly escapes quotes and strips newlines.
 - `test_coresignal_filters_are_allowlisted()` — asserts `CoresignalProvider._build_filters()` maps only allowlisted keys (school/location) and drops unknown ones.
+- `test_coresignal_builds_documented_employee_base_columns()` — asserts the built payload uses documented `employee_base` v2 columns, OR-joins a multi-value filter into a string, drops an unsupported founded-year key, and never emits the old 422-triggering keys.
 - `test_pdl_enrich_maps_200_and_handles_404_and_error()` — asserts `PdlProvider.enrich_person()` maps a 200 response to a populated `EnrichmentResult`, treats 404 as a clean cacheable miss (`last_error=None`), and treats 401 as a non-cacheable error (`last_error="HTTP 401"`).
 - `test_pdl_search_page_first_request_omits_scroll_token()` — asserts the first `search_page()` call (no cursor) sends neither `scroll_token` nor the deprecated `from` param, and that a `scroll_token` present in the response with a full page of results yields `exhausted=False`/`next_cursor` set to that token.
 - `test_pdl_search_page_resumes_with_scroll_token()` — asserts a resumed call sends `scroll_token` (not `from`) equal to the given cursor, and that a response with fewer records than requested and no `scroll_token` yields `exhausted=True`.
 - `test_coresignal_search_page_offsets_collects_and_counts_requests()` — asserts `CoresignalProvider.search_page()` tracks API request/credit counts across a paginated collect-then-detail-fetch flow and resumes correctly from a serialized cursor.
-- `test_founder_backtest_unchanged()` — regression guard asserting the founder backtest recall (`70.0%`) and false-positive rate (`1.7%`) are unchanged against the real seeded `signal_scout.db` (skipped if that DB or founders aren't present). Currently failing against the live `signal_scout.db` in this repo (`56.7%` recall) — pre-existing, unrelated to the provider-discovery work in this doc revision; confirmed present on an unmodified checkout too.
+- `test_founder_backtest_unchanged()` — regression guard asserting the founder backtest recall (`73.3%`) and false-positive rate (`1.7%`) are unchanged against the real seeded `signal_scout.db` (skipped if that DB or founders aren't present). The locked recall was updated from `70.0%` after the same-day boundary fix (inclusive `<=`) recovered same-day fellowship-cohort seed signals.
 
 ## tests/test_public_release_security.py
 Covers that product routes are open, that cron delivery still requires a bearer secret, that preview does not record a real send, that one-click approve flips `approval_state`, that public signup never leaks the subscriber's action token, and that production config fails closed without `CRON_SECRET`.
@@ -148,5 +153,19 @@ Covers scheduled discovery: seed auto-approve, `is_due` cadence, `run_due` last_
 
 - `test_seed_recipes_are_auto_approved()` — asserts every seeded recipe lands as `approval_state == "approved"`.
 - `test_is_due_respects_frequency_and_last_run()` — asserts weekly due/not-due windows, and that `manual` / `paused` recipes are never due.
-- `test_run_due_marks_last_run_when_provider_missing()` — asserts `run_due` records `last_run` even when providers are unconfigured (no-op expand), and a second tick finds nothing due.
+- `test_run_due_does_not_advance_last_run_when_provider_missing()` — asserts `run_due` does NOT record `last_run` when providers are unconfigured (never reached), so the recipe stays due and a second tick still finds the same recipes due.
 - `test_discovery_cron_requires_secret()` — asserts `POST /api/discovery/cron` returns 401 without bearer and 200 with `CRON_SECRET`.
+
+## tests/test_cleanup_perf_fixes.py
+Regression tests for the cleanup/perf/flaw-fix pass, built on a `Container` + `TestClient` (`RouterTestBase`): per-IP rate limits on spend routes, fail-soft `/api/health`, bounded `page_views` growth, and the batch repo loaders that replaced per-person N+1 reads.
+
+- `RateLimitTests`
+  - `test_send_digest_is_rate_limited()` — asserts the 4th `POST /api/digests/send` from one client returns 429 (limit 3/hour).
+  - `test_generate_digest_is_rate_limited()` — asserts the 11th `POST /api/digests/generate` from one client returns 429 (limit 10/hour).
+- `HealthTests`
+  - `test_health_ok()` — asserts `GET /api/health` returns 200 `{"status":"ok"}` on a live DB.
+  - `test_health_degrades_instead_of_500()` — asserts a DB whose `conn` raises makes health return 503 `{"status":"degraded"}` rather than a 500.
+- `PageViewCapTests`
+  - `test_prune_keeps_only_most_recent()` — asserts `PageViewRepository.prune(max_rows=5)` deletes the overflow and keeps exactly the 5 newest rows.
+- `BatchLoaderTests`
+  - `test_for_people_batches_signals_edges_reviews()` — asserts `signals.for_people` / `edges.for_people` / `candidate_reviews.for_people` group correctly for multiple ids, that a shared edge appears once under each endpoint, and that people without a signal/review are absent/empty.

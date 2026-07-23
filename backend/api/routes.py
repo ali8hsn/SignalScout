@@ -9,7 +9,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from backend.container import Container
@@ -48,6 +48,10 @@ def build_router(container: Container) -> APIRouter:
     attempts: dict[str, deque[float]] = defaultdict(deque)
 
     def rate_limit(request: Request, key: str, limit: int, window: int) -> None:
+        """Best-effort per-IP sliding-window limiter. State lives in `attempts`,
+        an in-memory dict, so counters are per-process and reset on restart — fine
+        for the single-instance Railway deploy, but would need shared storage
+        (e.g. Redis) if the API is ever scaled horizontally."""
         now = time.monotonic()
         identity = request.client.host if request.client else "unknown"
         bucket = attempts[f"{key}:{identity}"]
@@ -57,9 +61,32 @@ def build_router(container: Container) -> APIRouter:
             raise HTTPException(status_code=429, detail="Too many requests. Try again later.")
         bucket.append(now)
 
+    backtest_cache: dict[str, object] = {}
+
+    def cached_backtest() -> dict:
+        """Backtest depends only on persons/signals/edges (not on live scores), so
+        cache the (fairly expensive) full run and recompute only when any of those
+        row counts change — which covers every add/remove in the deployed app,
+        where founder/control history is seeded and immutable."""
+        conn = container.db.conn
+        key = "|".join(
+            str(conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"])
+            for table in ("persons", "signals", "graph_edges")
+        )
+        if backtest_cache.get("key") != key:
+            backtest_cache["key"] = key
+            backtest_cache["value"] = container.backtest.run()
+        return backtest_cache["value"]  # type: ignore[return-value]
+
     @router.get("/health")
     def health():
-        container.db.conn.execute("SELECT 1").fetchone()
+        try:
+            container.db.conn.execute("SELECT 1").fetchone()
+        except Exception as exc:  # noqa: BLE001 — health must degrade, not 500
+            return JSONResponse(
+                status_code=503,
+                content={"status": "degraded", "db": container.db.backend, "detail": str(exc)},
+            )
         return {"status": "ok", "db": container.db.backend}
 
     @router.post("/subscribers")
@@ -151,7 +178,7 @@ def build_router(container: Container) -> APIRouter:
 
     @router.get("/overview")
     def overview():
-        backtest = container.backtest.run()
+        backtest = cached_backtest()
         discoveries = container.candidate_service.list_candidates("discovery")
         flagged = [d for d in discoveries if d["flagged"]]
         provider_discoveries = [
@@ -196,7 +223,7 @@ def build_router(container: Container) -> APIRouter:
 
     @router.get("/backtest")
     def backtest():
-        return container.backtest.run()
+        return cached_backtest()
 
     @router.get("/concentrations")
     def concentrations():
@@ -210,7 +237,8 @@ def build_router(container: Container) -> APIRouter:
         return {"digest": _digest_dict(digest)}
 
     @router.post("/digests/generate")
-    def generate_digest():
+    def generate_digest(request: Request):
+        rate_limit(request, "generate-digest", 10, 60 * 60)
         digest = container.digest_generator.generate()
         return {"digest": _digest_dict(digest)}
 
@@ -234,7 +262,8 @@ def build_router(container: Container) -> APIRouter:
         return {"recipes": container.discovery_recipe_service.list_recipes()}
 
     @router.post("/discovery/recipes/{recipe_id}/approve")
-    def approve_discovery_recipe(recipe_id: str):
+    def approve_discovery_recipe(recipe_id: str, request: Request):
+        rate_limit(request, "recipe-approve", 30, 60 * 60)
         try:
             return container.discovery_recipe_service.approve(recipe_id)
         except ValueError as exc:
@@ -243,8 +272,10 @@ def build_router(container: Container) -> APIRouter:
     @router.post("/discovery/recipes/{recipe_id}/run")
     def run_discovery_recipe(
         recipe_id: str,
+        request: Request,
         limit: int | None = Query(default=None),
     ):
+        rate_limit(request, "recipe-run", 12, 60 * 60)
         try:
             return container.discovery_recipe_service.run(recipe_id, override_limit=limit)
         except ValueError as exc:
@@ -255,8 +286,10 @@ def build_router(container: Container) -> APIRouter:
     @router.post("/discovery/recipes/{recipe_id}/dry-run")
     def dry_run_discovery_recipe(
         recipe_id: str,
+        request: Request,
         limit: int | None = Query(default=None),
     ):
+        rate_limit(request, "recipe-dry-run", 30, 60 * 60)
         try:
             return container.discovery_recipe_service.dry_run(recipe_id, override_limit=limit)
         except ValueError as exc:
@@ -267,10 +300,11 @@ def build_router(container: Container) -> APIRouter:
         return container.discovery_recipe_service.cost_summary()
 
     @router.post("/digests/send")
-    def send_digest():
+    def send_digest(request: Request):
         """Send the current curated (approved + contactable) picks to every
         active subscriber right now via Resend. Falls back to preview receipts
         when Resend is unconfigured. Re-sends are deduped per subscriber."""
+        rate_limit(request, "send-digest", 3, 60 * 60)
         return {"summary": container.subscriber_digest.send_to_active()}
 
     @router.get("/digest/preview")
@@ -297,7 +331,9 @@ def build_router(container: Container) -> APIRouter:
     def review_candidate(
         person_id: str,
         payload: CandidateReviewRequest,
+        request: Request,
     ):
+        rate_limit(request, "review-candidate", 120, 60)
         try:
             review = container.candidate_review_service.review(
                 person_id=person_id,

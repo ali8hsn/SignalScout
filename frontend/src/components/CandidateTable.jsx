@@ -10,11 +10,9 @@ export default function CandidateTable({
   onApprove,
   onReject,
   reviewBusyId = null,
-  highlightIds,
   defaultView = 'provider',
   defaultUnknownsOnly = true,
 }) {
-  const highlight = highlightIds instanceof Set ? highlightIds : new Set(highlightIds || []);
   const [sortKey, setSortKey] = useState('score');
   const [sortDesc, setSortDesc] = useState(true);
   const [areaFilter, setAreaFilter] = useState('All');
@@ -132,9 +130,7 @@ export default function CandidateTable({
         {rows.map((c, position) => (
           <article
             key={c.id}
-            className={`bg-card border rounded-md px-5 sm:px-6 py-5 ${
-              highlight.has(c.id) ? 'border-olive bg-olive/10' : 'border-line'
-            }`}
+            className="bg-card border border-line rounded-md px-5 sm:px-6 py-5"
           >
             <div className="flex items-start gap-4">
               <span className="font-mono text-sm text-olive mt-1">
@@ -143,12 +139,7 @@ export default function CandidateTable({
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <h2 className="font-display text-2xl">
-                      {c.name}
-                      {highlight.has(c.id) && (
-                        <span className="ml-2 font-mono text-[9px] tracking-widest text-olive align-middle">NEW</span>
-                      )}
-                    </h2>
+                    <h2 className="font-display text-2xl">{c.name}</h2>
                     <p className="text-xs text-ink-faint mt-1">
                       {[c.school, c.area, c.region || c.current_location].filter(Boolean).join(' · ') || 'Public profile signals'}
                     </p>

@@ -70,6 +70,7 @@ class ProviderExpansionResult:
     verified: int = 0
     review: int = 0
     duplicates: int = 0
+    errors: int = 0  # provider search pages that failed (e.g. HTTP 422/5xx)
     rejection_reasons: dict[str, int] = field(default_factory=dict)
     planned_pages: list[dict] = field(default_factory=list)
 
@@ -90,6 +91,10 @@ class ProviderExpander:
         self.enricher = enricher
         self.budget = budget
         self.filters_file = filters_file
+        # Per-run normalized-name -> [Person] index for the dedupe ladder's name
+        # tier, built once per run (reset in expand/run_recipe) instead of a full
+        # `persons.all()` scan for every ingested record.
+        self._name_index: dict[str, list[Person]] | None = None
 
     def expand(
         self,
@@ -97,6 +102,7 @@ class ProviderExpander:
         on_progress: Callable[[str, int], None] | None = None,
     ) -> ProviderExpansionResult:
         result = ProviderExpansionResult(source_counts={p.name: 0 for p in self.providers})
+        self._name_index = None
         if not self.providers:
             return result
         config = self._load_config()
@@ -149,6 +155,7 @@ class ProviderExpander:
         recipe must be `approved` before its first non-dry run; dry runs are
         always allowed so operators can preview before approving."""
         result = ProviderExpansionResult(source_counts={recipe.provider: 0})
+        self._name_index = None
         if not dry_run and recipe.approval_state != "approved":
             raise PermissionError(f"recipe {recipe.id!r} requires approval before a real run")
         provider = self._provider_by_name(recipe.provider)
@@ -413,6 +420,7 @@ class ProviderExpander:
             result.api_requests += page.api_requests
             result.returned_records += page.returned_records
             if provider.last_error:
+                result.errors += 1
                 logger.warning(
                     "%s search failed (%s) — checkpoint not advanced",
                     provider.name,
@@ -555,6 +563,10 @@ class ProviderExpander:
         person.contact_info["discovered_via"] = provider.name
         person.contact_info["discovery_lane"] = "provider_search"
         self.persons.save(person)
+        # Keep the per-run dedupe index in sync so a second record for the same
+        # new person later in the run still resolves against it.
+        if self._name_index is not None:
+            self._name_index.setdefault(normalize_name(person.name), []).append(person)
         self._link(provider, record, person.id, today)
         self.enricher.apply_result(
             person,
@@ -591,14 +603,25 @@ class ProviderExpander:
         key = normalize_name(record.full_name)
         school = _best_recent_technical_education(record.education)
         school_name = school.school.lower() if school and school.school else None
-        for existing in self.persons.all():
-            if normalize_name(existing.name) != key:
-                continue
+        for existing in self._persons_by_name(key):
+            # Only merge when a shared school corroborates the name match. A
+            # name-only match (both sides lacking a school) is NOT enough — two
+            # different people with the same name would otherwise be collapsed —
+            # so those fall through to a fresh (review-tier) person instead.
             if school_name and existing.school and school_name in existing.school.lower():
                 return existing, "merged"
-            if not school_name and not existing.school:
-                return existing, "merged"
         return None, ""
+
+    def _persons_by_name(self, key: str) -> list[Person]:
+        """Candidates sharing a normalized name, from a per-run index built once
+        (and kept updated as new people are created) rather than re-scanning the
+        whole persons table for every ingested record."""
+        if self._name_index is None:
+            index: dict[str, list[Person]] = {}
+            for person in self.persons.all():
+                index.setdefault(normalize_name(person.name), []).append(person)
+            self._name_index = index
+        return self._name_index.get(key, [])
 
     def _link(self, provider: EnrichmentProvider, record: EnrichmentResult, person_id: str, today: str) -> None:
         pid = record.provider_person_id or canonical_linkedin(record.linkedin_url)

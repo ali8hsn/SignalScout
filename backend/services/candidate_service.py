@@ -51,10 +51,13 @@ class CandidateService:
         today = date.today()
         cohort = [p for p in self.persons.all() if p.cohort in ("founder", "discovery", "demo")]
         seed_ids = {p.id for p in cohort if p.cohort == "founder"}
+        ids = [p.id for p in cohort]
+        sigs_by = self.signals.for_people(ids)
+        edges_by = self.edges.for_people(ids)
         adjusted: dict[str, float] = {}
         for person in cohort:
-            sigs = self.signals.for_person(person.id)
-            person_edges = self.edges.for_person(person.id)
+            sigs = sigs_by.get(person.id, [])
+            person_edges = edges_by.get(person.id, [])
             conn = self.engine.connection_signal(person, person_edges, seed_ids - {person.id}, today)
             if conn:
                 sigs = sigs + [conn]
@@ -62,8 +65,7 @@ class CandidateService:
             adjusted[person.id] = base * self._knownness_factor(person)
         reference = founder_reference(self.persons, self.signals, self.edges, self.engine)
         normalized = self.engine.normalize_calibrated(adjusted, reference)
-        for person_id, score in normalized.items():
-            self.persons.update_score(person_id, score)
+        self.persons.update_scores(normalized)
         return normalized
 
     @staticmethod
@@ -91,7 +93,17 @@ class CandidateService:
         people = [p for p in people if p.score is not None]
         people.sort(key=lambda p: -(p.score or 0))
         founders_by_id = {p.id: p for p in self.persons.all("founder")}
-        return [self._summary(p, founders_by_id) for p in people]
+        ids = [p.id for p in people]
+        sigs_by = self.signals.for_people(ids)
+        edges_by = self.edges.for_people(ids)
+        reviews_by = self.reviews.for_people(ids) if self.reviews else {}
+        return [
+            self._summary(
+                p, founders_by_id,
+                sigs_by.get(p.id, []), edges_by.get(p.id, []), reviews_by.get(p.id),
+            )
+            for p in people
+        ]
 
     def profile(self, person_id: str) -> dict | None:
         person = self.persons.get(person_id)
@@ -102,10 +114,11 @@ class CandidateService:
         today = date.today()
         sigs = self.signals.for_person(person.id)
         person_edges = self.edges.for_person(person.id)
+        review = self.reviews.get(person.id) if self.reviews else None
         conn = self.engine.connection_signal(person, person_edges, seed_ids, today)
         all_sigs = sigs + [conn] if conn else sigs
         breakdown = self.engine.compute(person, all_sigs, today)
-        summary = self._summary(person, founders_by_id)
+        summary = self._summary(person, founders_by_id, sigs, person_edges, review)
         summary.update({
             "breakdown": self._breakdown_dict(breakdown),
             "timeline": [
@@ -120,10 +133,14 @@ class CandidateService:
         })
         return summary
 
-    def _summary(self, person: Person, founders_by_id: dict[str, Person]) -> dict:
-        sigs = self.signals.for_person(person.id)
-        review = self.reviews.get(person.id) if self.reviews else None
-        person_edges = self.edges.for_person(person.id)
+    def _summary(
+        self,
+        person: Person,
+        founders_by_id: dict[str, Person],
+        sigs: list,
+        person_edges: list[GraphEdge],
+        review,
+    ) -> dict:
         top = sorted(sigs, key=lambda s: -(s.signal_strength * 1.0))[:3]
         seed_edges = self._seed_edges(person, person_edges, founders_by_id)
         source_counts = self._source_counts(sigs)
@@ -250,15 +267,6 @@ class CandidateService:
         counts: dict[str, int] = {}
         for s in signals:
             counts[s.source] = counts.get(s.source, 0) + 1
-        return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
-
-    def source_mix(self, cohort: str = "discovery") -> dict[str, int]:
-        """Signal counts by source across a cohort — shows whether GitHub's share
-        is actually falling rather than inferring it from a few candidates."""
-        counts: dict[str, int] = {}
-        for person in self.persons.all(cohort):
-            for s in self.signals.for_person(person.id):
-                counts[s.source] = counts.get(s.source, 0) + 1
         return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
 
     @staticmethod

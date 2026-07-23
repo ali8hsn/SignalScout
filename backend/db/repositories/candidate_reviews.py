@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from backend.db.repositories.base import BaseRepository
+from backend.db.repositories.base import BaseRepository, chunked
 from backend.domain.candidate_review import CandidateReview
 
 REVIEW_STATES = {"pending", "approved", "rejected"}
@@ -20,6 +20,21 @@ class CandidateReviewRepository(BaseRepository):
             (person_id,),
         ).fetchone()
         return self._to_model(row) if row else None
+
+    def for_people(self, person_ids: list[str]) -> dict[str, CandidateReview]:
+        """Batch variant of `get`: load every review for the given people in one
+        query per chunk, keyed by `person_id` (people without a review are absent)."""
+        reviews: dict[str, CandidateReview] = {}
+        for chunk in chunked(person_ids, 400):
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self.conn.execute(
+                f"SELECT * FROM candidate_reviews WHERE person_id IN ({placeholders})",
+                tuple(chunk),
+            ).fetchall()
+            for row in rows:
+                model = self._to_model(row)
+                reviews[model.person_id] = model
+        return reviews
 
     def all(self, state: str | None = None) -> list[CandidateReview]:
         if state:

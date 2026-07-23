@@ -79,9 +79,10 @@ class LeadResolver:
         for person in self.persons.all():
             if normalize_name(person.name) != key:
                 continue
+            # Only a shared school corroborates the name match; a name-only match
+            # (both lacking a school) is too weak to merge two possibly-different
+            # people, so it falls through to a fresh paid-lookup identification.
             if school and person.school and school in person.school.lower():
-                return person
-            if not school and not person.school:
                 return person
         return None
 

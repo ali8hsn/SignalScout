@@ -11,7 +11,7 @@ Single-candidate "profile card" view used in Discover's card-browsing mode, show
 ## frontend/src/components/CandidateTable.jsx
 Filterable, sortable list/table of candidates used in Discover's "Browse all" mode, with view tabs (provider/cross-source/all), area and source filters, and an unknowns-only toggle. Discover's review mode passes `defaultView='all'` and optional Approve/Reject handlers.
 
-- `CandidateTable({ candidates, onSelect, onApprove, onReject, reviewBusyId, highlightIds, defaultView = 'provider', defaultUnknownsOnly = true })` — derives filter option lists (areas, sources) from `candidates`, applies view filter (via `filterCandidatesByView`), area/source/unknowns filters, and score/name sorting, then renders each row as a card showing name, score, signal count, thesis, source-count badges, `SignalBadge` list, and orbit context; clicking "VIEW FULL EVIDENCE" calls `onSelect(candidate)`; optional `onApprove`/`onReject` render one-click review buttons (disabled while `reviewBusyId` matches the row); rows in `highlightIds` get a "NEW" badge and highlighted border.
+- `CandidateTable({ candidates, onSelect, onApprove, onReject, reviewBusyId, defaultView = 'provider', defaultUnknownsOnly = true })` — derives filter option lists (areas, sources) from `candidates`, applies view filter (via `filterCandidatesByView`), area/source/unknowns filters, and score/name sorting, then renders each row as a card showing name, score, signal count, thesis, source-count badges, `SignalBadge` list, and orbit context; clicking "VIEW FULL EVIDENCE" calls `onSelect(candidate)`; optional `onApprove`/`onReject` render one-click review buttons (disabled while `reviewBusyId` matches the row).
 
 ## frontend/src/components/candidateViews.js
 Pure data-shaping helpers defining the candidate "view" tabs (provider discoveries / cross-source / all) and the filtering logic behind them, consumed by `CandidateTable` and unit-tested in `candidateViews.test.js`.
@@ -32,7 +32,7 @@ Renders a row of outbound contact links (GitHub, LinkedIn, X, Email, Site) for a
 ## frontend/src/components/CostDashboard.jsx
 Discovery-recipe provider cost dashboard shown on the Pipeline page — provider credit totals, duplicates skipped, enrichment credits saved, and a per-recipe credit breakdown.
 
-- `providerLabel(provider) -> string` — maps `"pdl"`/`"coresignal"` to display labels.
+- Provider display names come from the shared `sourceLabel` helper in `SignalBadge.jsx` (maps `pdl`/`coresignal`/`exa`, passes through anything else).
 - `CostDashboard({ summary })` — renders a loading placeholder when `summary` is absent; otherwise one tile per provider (`search_credits_used`, `search_credits_remaining`, from `GET /api/discovery/cost-summary`'s `provider_totals`), a `duplicates_skipped`/`enrichment_credits_saved` line, and (when present) a per-recipe list (`recipe_totals`) showing credit units — split into search/collect credits when a provider tracks them separately (Coresignal) — created count, and dedupe count.
 
 ## frontend/src/components/DigestSignup.jsx
@@ -44,13 +44,6 @@ Self-contained email signup form (with optional signal-interest/seed-account per
 Modal overlay showing the full evidence "receipt" for one candidate: score breakdown table, signal timeline, network connections, and optional review actions, fetched by person ID.
 
 - `EvidencePanel({ personId, onClose, onApprove, onReject, onUnreview, reviewBusy = false })` — fetches `api.candidate(personId)` on mount/`personId` change, shows loading/error states (with retry), and on success renders the candidate's name/school/region, `ContactLinks`, source-count badges, a score-breakdown table (`profile.breakdown.items` with evidence label, date, source, strength×weight, points, plus a raw/recency/diversity/age formula summary), a `SignalTimeline`, a list of network `connections`, and (when handlers are provided) Approve/Reject/Unreview buttons; clicking the backdrop or CLOSE calls `onClose`.
-
-## frontend/src/components/PipelineProgress.jsx
-Live status widget for the discovery pipeline run (scrape -> resolve -> enrich -> score), polled from Discover while a run is in progress.
-
-- `countLabel(name, count) -> string` — formats the per-stage count label (e.g. "N profiles", "N unknowns", "N enriched", "scored") based on stage name.
-- `Dot({ status })` — renders a small status-colored circle (done/active/error/pending) for one pipeline stage.
-- `PipelineProgress({ status })` — renders nothing if `status` is absent or idle; otherwise renders a horizontal stage tracker with `Dot` indicators, stage labels/hints, connecting lines, a RUNNING/DONE/ERROR badge, and an error message when `status.error` is set.
 
 ## frontend/src/components/ScoreDistribution.jsx
 Overlaid histogram comparing founder vs. control score distributions for the Backtest page, with a threshold marker.

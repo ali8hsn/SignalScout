@@ -14,15 +14,16 @@ Defines the `build_router(container)` factory that assembles every `/api/*` Fast
 - `PageViewEvent` — Pydantic request model for client-side analytics page-view beacons (path, optional referrer).
 - `CandidateReviewRequest` — Pydantic request model for a review decision on a discovery candidate (state, optional notes/evidence fields).
 - `build_router(container: Container) -> APIRouter` — constructs and returns the `/api`-prefixed router, defining a per-process in-memory rate-limit bucket and every route handler as a closure over `container`.
-  - `rate_limit(request, key, limit, window) -> None` (nested) — sliding-window rate limiter keyed by client IP and an action key, using an in-memory `deque`; raises HTTP 429 once the limit is exceeded within the window.
-  - `health()` — `GET /api/health` — runs a trivial `SELECT 1` against the database and returns `{"status": "ok", "db": ...}` as a liveness/DB-connectivity check.
+  - `rate_limit(request, key, limit, window) -> None` (nested) — best-effort sliding-window rate limiter keyed by client IP and an action key, using an in-memory per-process `deque` (resets on restart; would need shared storage if scaled horizontally); raises HTTP 429 once the limit is exceeded within the window. Applied to the spend/email/mutation routes: `subscribe`, `send_test_digest`, `record_page_view`, `run_discovery`, `generate_digest`, `send_digest`, `approve_discovery_recipe`, `run_discovery_recipe`, `dry_run_discovery_recipe`, and `review_candidate`.
+  - `health()` — `GET /api/health` — runs a trivial `SELECT 1` against the database and returns `{"status": "ok", "db": ...}`; on a DB error it fails soft with HTTP 503 `{"status": "degraded", ...}` instead of a 500.
   - `subscribe(payload, request)` — `POST /api/subscribers` — rate-limits signups, validates and normalizes the email/frequency, parses comma-separated seed accounts, and delegates persistence to `container.subscribers.subscribe(...)`.
   - `send_test_digest(payload, request)` — `POST /api/digest/test` — rate-limits per subscriber, enforces production-only owner-email restriction and a 24-hour resend cooldown (via `container.digest_sends`), then delegates actual delivery to `container.subscriber_digest.deliver(...)`.
   - `record_page_view(payload, request)` — `POST /api/analytics/page-view` (202) — rate-limits, validates the path is relative, and records the event via `container.page_views.record(...)`.
-  - `overview()` — `GET /api/overview` — aggregates backtest metrics (`container.backtest.run()`), discovery counts/flags (all approval states), and provider-search verification stats into a single dashboard summary payload.
+  - `overview()` — `GET /api/overview` — aggregates backtest metrics (via `cached_backtest()`), discovery counts/flags (all approval states), and provider-search verification stats into a single dashboard summary payload.
+  - `cached_backtest()` (closure) — returns `container.backtest.run()` cached and recomputed only when the persons/signals/graph_edges row counts change, so `/overview` and `/backtest` don't rerun the full backtest on every request.
   - `candidates(cohort)` — `GET /api/candidates` — lists candidates for a cohort via `container.candidate_service.list_candidates(...)` with no approval-state filter.
   - `candidate(person_id)` — `GET /api/candidates/{person_id}` — fetches a single candidate profile via `container.candidate_service.profile(...)`, 404ing if missing.
-  - `backtest()` — `GET /api/backtest` — returns raw backtest results from `container.backtest.run()`.
+  - `backtest()` — `GET /api/backtest` — returns raw backtest results via `cached_backtest()`.
   - `concentrations()` — `GET /api/concentrations` — returns all detected signal concentrations via `container.concentrations.all()`.
   - `latest_digest()` — `GET /api/digests/latest` — returns the most recently generated digest via `container.digests.latest()`.
   - `generate_digest()` — `POST /api/digests/generate` — triggers `container.digest_generator.generate()` and returns the new digest.

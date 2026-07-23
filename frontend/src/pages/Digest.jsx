@@ -1,33 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api/client.js';
 import ContactLinks from '../components/ContactLinks.jsx';
 import DigestSignup from '../components/DigestSignup.jsx';
+import { useAsyncData } from '../hooks/useAsyncData.js';
 
-export default function Digest({ operatorMode = false }) {
-  const [digest, setDigest] = useState(null);
+export default function Digest() {
   const [busy, setBusy] = useState(false);
   const [sendReceipt, setSendReceipt] = useState(null);
-  const [loadState, setLoadState] = useState('loading');
   const [error, setError] = useState('');
-
-  const loadLatest = () => {
-    setLoadState('loading');
-    setError('');
-    api.latestDigest()
-      .then((d) => {
-        setDigest(d.digest);
-        setLoadState('success');
-      })
-      .catch(() => {
-        setLoadState('error');
-        setError('The latest digest could not be loaded. Try again in a moment.');
-      });
-  };
-
-  useEffect(() => {
-    if (operatorMode) loadLatest();
-    else setLoadState('public');
-  }, [operatorMode]);
+  const {
+    data: digest,
+    state: loadState,
+    reload: loadLatest,
+    setData: setDigest,
+  } = useAsyncData(() => api.latestDigest().then((d) => d.digest));
 
   const generate = async () => {
     setBusy(true);
@@ -56,21 +42,6 @@ export default function Digest({ operatorMode = false }) {
       setBusy(false);
     }
   };
-
-  if (!operatorMode) {
-    return (
-      <div className="max-w-2xl mx-auto">
-        <DigestSignup />
-        <section className="bg-card border border-line rounded-md px-6 py-8">
-          <p className="label-mono text-olive">Subscriber digest</p>
-          <h2 className="font-display text-2xl mt-2">Reviewed signals, delivered directly.</h2>
-          <p className="text-sm text-ink-soft mt-3">
-            Generation, previews, and sends remain restricted to the server-side review workflow.
-          </p>
-        </section>
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -112,11 +83,13 @@ export default function Digest({ operatorMode = false }) {
         </p>
       )}
 
-      {error && (
+      {(error || loadState === 'error') && (
         <div role="alert" className="border border-red-300 bg-red-50 rounded-sm px-4 py-3 mb-5">
-          <p className="text-sm text-red-700">{error}</p>
+          <p className="text-sm text-red-700">
+            {error || 'The latest digest could not be loaded. Try again in a moment.'}
+          </p>
           {loadState === 'error' && (
-            <button onClick={loadLatest} className="font-mono text-[10px] tracking-widest text-red-700 underline mt-1">
+            <button onClick={() => loadLatest().catch(() => {})} className="font-mono text-[10px] tracking-widest text-red-700 underline mt-1">
               TRY AGAIN
             </button>
           )}

@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS persons (
 
 CREATE INDEX IF NOT EXISTS idx_persons_github ON persons(github_username);
 CREATE INDEX IF NOT EXISTS idx_persons_cohort ON persons(cohort);
+-- Backs the score-descending candidate listing/ranking reads.
+CREATE INDEX IF NOT EXISTS idx_persons_score ON persons(score);
 
 -- Human launch review is separate from machine/provider review metadata.
 -- approved_at is preserved across edits while approved and defines launch newness.
@@ -86,6 +88,8 @@ CREATE TABLE IF NOT EXISTS graph_edges (
 
 CREATE INDEX IF NOT EXISTS idx_edges_source ON graph_edges(source_person_id);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON graph_edges(target_person_id);
+-- Backs edge-type lookups that filter on the inbound (target) endpoint.
+CREATE INDEX IF NOT EXISTS idx_edges_type_target ON graph_edges(edge_type, target_person_id);
 
 CREATE TABLE IF NOT EXISTS concentrations (
     id TEXT PRIMARY KEY,

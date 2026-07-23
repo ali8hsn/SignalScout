@@ -21,16 +21,10 @@ export const api = {
   candidates: (cohort = 'discovery') => request(`/api/candidates?cohort=${cohort}`),
   candidate: (id) => request(`/api/candidates/${id}`),
   backtest: () => request('/api/backtest'),
-  concentrations: () => request('/api/concentrations'),
   latestDigest: () => request('/api/digests/latest'),
   generateDigest: () => request('/api/digests/generate', { method: 'POST' }),
   sendDigest: () => request('/api/digests/send', { method: 'POST' }),
   subscribe: (payload) => request('/api/subscribers', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  }),
-  sendTestDigest: (payload) => request('/api/digest/test', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -40,8 +34,6 @@ export const api = {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   }),
-  runDiscovery: () => request('/api/discovery/run', { method: 'POST' }),
-  discoveryStatus: () => request('/api/discovery/status'),
   discoveryRecipes: () => request('/api/discovery/recipes'),
   runRecipe: (id, limit) => request(
     `/api/discovery/recipes/${id}/run${limit ? `?limit=${limit}` : ''}`,

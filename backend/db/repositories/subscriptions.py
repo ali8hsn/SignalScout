@@ -50,13 +50,6 @@ class SubscriberRepository(BaseRepository):
         ).fetchone()
         return self._to_model(row) if row else None
 
-    def get_by_token(self, token: str) -> Subscriber | None:
-        row = self.conn.execute(
-            "SELECT * FROM subscribers WHERE unsubscribe_token = ?",
-            (token,),
-        ).fetchone()
-        return self._to_model(row) if row else None
-
     def active(self, frequency: str | None = None, email: str | None = None) -> list[Subscriber]:
         clauses = ["active = 1"]
         params: list[str] = []

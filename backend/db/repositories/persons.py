@@ -77,6 +77,13 @@ class PersonRepository(BaseRepository):
         self.conn.execute("UPDATE persons SET score = ? WHERE id = ?", (score, person_id))
         self.conn.commit()
 
+    def update_scores(self, scores: dict[str, float]) -> None:
+        """Persist many scores in a single transaction (one commit), instead of
+        committing per person as `update_score` does — the rescore hot path."""
+        for person_id, score in scores.items():
+            self.conn.execute("UPDATE persons SET score = ? WHERE id = ?", (score, person_id))
+        self.conn.commit()
+
     def delete(self, person_id: str) -> None:
         self.conn.execute("DELETE FROM persons WHERE id = ?", (person_id,))
         self.conn.commit()
@@ -126,8 +133,28 @@ class PersonRepository(BaseRepository):
             rows = self.conn.execute("PRAGMA table_info(persons)").fetchall()
         return {row["name"] for row in rows}
 
+    def _needs_legacy_backfill(self) -> bool:
+        """True only if some discovery row is still missing metadata the backfill
+        would derive. Lets `__init__` skip the full rescan (and its per-row signal
+        subqueries) on every Container build once the data is already migrated —
+        the conditions below mirror exactly the rows the backfill loop can change."""
+        row = self.conn.execute(
+            """SELECT 1 FROM persons
+               WHERE cohort = 'discovery' AND (
+                   discovery_origin IS NULL
+                   OR (discovery_origin = 'provider_search' AND evidence_tier IS NULL)
+                   OR (discovery_origin = 'github' AND enrichment_status IS NULL)
+                   OR (enrichment_status = 'provider_enriched' AND enrichment_provider IS NULL)
+                   OR (discovery_origin = 'provider_search' AND discovery_source IS NULL)
+               )
+               LIMIT 1"""
+        ).fetchone()
+        return row is not None
+
     def _derive_legacy_discovery_metadata(self) -> None:
         """Fill only missing metadata on pre-migration discovery rows."""
+        if not self._needs_legacy_backfill():
+            return
         rows = self.conn.execute(
             """SELECT p.id, p.github_username, p.contact_info, p.discovery_origin,
                       p.evidence_tier, p.review_required, p.enrichment_status,

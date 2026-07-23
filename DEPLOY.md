@@ -196,8 +196,6 @@ Licensed enrichment runs a PDL-first, Coresignal-fallback chain plus an
 independent provider-search discovery lane. A provider is used whenever its key
 is present; missing keys degrade to a no-op.
 
-- `ENRICHMENT_PROVIDER` — legacy single-provider hint (`pdl`/`coresignal`); the
-  chain is PDL-first regardless. Default `pdl`.
 - `PDL_API_KEY` — People Data Labs key (primary enricher + lead search lane).
   Obtain it from the [PDL dashboard](https://dashboard.peopledatalabs.com/).
 - `CORESIGNAL_API_KEY` — Coresignal employee API key (independent search + PDL
@@ -211,8 +209,6 @@ is present; missing keys degrade to a no-op.
 - `PROVIDER_PER_RUN_CAP` — max fresh provider lookups per run/process; default `100`.
 - `CORESIGNAL_DAILY_CAP` — Coresignal's separate daily cap (search + fallback);
   default `20`.
-- `DAILY_ENRICHMENT_BUDGET` — legacy global daily counter, superseded by the
-  provider-scoped budgets above; default `100`.
 
 Required for real email delivery:
 

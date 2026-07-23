@@ -16,6 +16,7 @@ export const SOURCE_LABELS = {
   github: 'GitHub',
   pdl: 'PDL',
   coresignal: 'Coresignal',
+  exa: 'Exa',
   semantic_scholar: 'Semantic Scholar',
   devpost: 'Devpost',
   graph: 'Network',

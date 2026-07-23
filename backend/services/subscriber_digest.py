@@ -33,11 +33,23 @@ class SubscriberDigestService:
         self.action_signer = action_signer
         self.size = size
 
-    def build(self, subscriber: Subscriber) -> tuple[EmailMessage, list[str]]:
+    def build(
+        self,
+        subscriber: Subscriber,
+        all_candidates: list[dict] | None = None,
+    ) -> tuple[EmailMessage, list[str]]:
+        # The discovery candidate pool is identical for every subscriber, so a
+        # caller sending to many subscribers computes it once and passes it in;
+        # only the per-subscriber sent-ledger and preference sort differ.
+        candidates = (
+            all_candidates
+            if all_candidates is not None
+            else self.candidates.list_candidates("discovery")
+        )
         sent_ids = self.sends.sent_person_ids(subscriber.id)
         pool = [
             candidate
-            for candidate in self.candidates.list_candidates("discovery")
+            for candidate in candidates
             if candidate["id"] not in sent_ids
             and candidate.get("approval_state") == "approved"
             and candidate.get("contactable")
@@ -62,11 +74,9 @@ class SubscriberDigestService:
         )
 
     def preview(self, subscriber: Subscriber) -> dict:
-        message, person_ids = self.build(subscriber)
-        candidates_by_id = {
-            candidate["id"]: candidate
-            for candidate in self.candidates.list_candidates("discovery")
-        }
+        all_candidates = self.candidates.list_candidates("discovery")
+        message, person_ids = self.build(subscriber, all_candidates)
+        candidates_by_id = {candidate["id"]: candidate for candidate in all_candidates}
         picks = [candidates_by_id[person_id] for person_id in person_ids]
         source_mix: dict[str, int] = {}
         for candidate in picks:
@@ -81,8 +91,13 @@ class SubscriberDigestService:
             "source_mix": dict(sorted(source_mix.items())),
         }
 
-    def deliver(self, subscriber: Subscriber, dry_run: bool = False) -> dict:
-        message, person_ids = self.build(subscriber)
+    def deliver(
+        self,
+        subscriber: Subscriber,
+        dry_run: bool = False,
+        all_candidates: list[dict] | None = None,
+    ) -> dict:
+        message, person_ids = self.build(subscriber, all_candidates)
         if not person_ids:
             return {
                 "email": subscriber.email,
@@ -129,7 +144,11 @@ class SubscriberDigestService:
                 if subscriber.frequency == "daily"
                 or (subscriber.frequency == "weekly" and run_at.weekday() == 0)
             ]
-        results = [self.deliver(subscriber, dry_run=dry_run) for subscriber in due]
+        all_candidates = self.candidates.list_candidates("discovery")
+        results = [
+            self.deliver(subscriber, dry_run=dry_run, all_candidates=all_candidates)
+            for subscriber in due
+        ]
         return {
             "dry_run": dry_run,
             "run_at": run_at.isoformat(timespec="seconds"),
@@ -146,7 +165,11 @@ class SubscriberDigestService:
         run_at = now or datetime.now(timezone.utc)
         self.candidates.rescore_all()
         subscribers = self.subscribers.active()
-        results = [self.deliver(subscriber, dry_run=dry_run) for subscriber in subscribers]
+        all_candidates = self.candidates.list_candidates("discovery")
+        results = [
+            self.deliver(subscriber, dry_run=dry_run, all_candidates=all_candidates)
+            for subscriber in subscribers
+        ]
         return {
             "dry_run": dry_run,
             "run_at": run_at.isoformat(timespec="seconds"),

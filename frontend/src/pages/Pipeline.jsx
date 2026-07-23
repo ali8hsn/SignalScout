@@ -2,13 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import CostDashboard from '../components/CostDashboard.jsx';
 import SourceMixChart from '../components/SourceMixChart.jsx';
-
-function providerLabel(provider) {
-  if (provider === 'pdl') return 'PDL';
-  if (provider === 'coresignal') return 'Coresignal';
-  if (provider === 'exa') return 'Exa';
-  return provider;
-}
+import { sourceLabel as providerLabel } from '../components/SignalBadge.jsx';
 
 function outcomeBadge(r) {
   if (!r.provider_configured) {

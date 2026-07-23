@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../api/client.js';
 import EvidencePanel from '../components/EvidencePanel.jsx';
 import ScoreDistribution from '../components/ScoreDistribution.jsx';
+import { useAsyncData } from '../hooks/useAsyncData.js';
 
 function Metric({ label, value, detail }) {
   return (
@@ -14,21 +15,8 @@ function Metric({ label, value, detail }) {
 }
 
 export default function Backtest() {
-  const [report, setReport] = useState(null);
   const [evidenceId, setEvidenceId] = useState(null);
-  const [state, setState] = useState('loading');
-
-  const load = () => {
-    setState('loading');
-    api.backtest()
-      .then((result) => {
-        setReport(result);
-        setState('success');
-      })
-      .catch(() => setState('error'));
-  };
-
-  useEffect(load, []);
+  const { data: report, state, reload } = useAsyncData(api.backtest);
 
   if (state === 'loading') {
     return <p className="font-mono text-xs text-ink-faint">Running the historical backtest…</p>;
@@ -38,7 +26,7 @@ export default function Backtest() {
       <div role="alert" className="bg-card border border-line rounded-md px-6 py-10 text-center">
         <p className="font-display text-xl">The backtest could not load.</p>
         <p className="text-sm text-ink-faint mt-1">No results were changed. Try the calculation again.</p>
-        <button onClick={load} className="mt-4 bg-olive text-cream font-mono text-[10px] tracking-widest px-4 py-2 rounded-sm">
+        <button onClick={() => reload().catch(() => {})} className="mt-4 bg-olive text-cream font-mono text-[10px] tracking-widest px-4 py-2 rounded-sm">
           RUN AGAIN
         </button>
       </div>

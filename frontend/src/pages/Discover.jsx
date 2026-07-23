@@ -42,17 +42,15 @@ export default function Discover() {
     });
   };
 
-  const loadSourceMix = () => {
+  const loadSourceMix = () =>
     api.overview()
       .then((d) => setSourceMix(d.source_mix || null))
       .catch(() => {});
-  };
 
   useEffect(() => {
-    loadCandidates().catch(() => {});
+    // Fire both reads together on mount rather than in separate effects.
+    Promise.all([loadCandidates(), loadSourceMix()]).catch(() => {});
   }, []);
-
-  useEffect(loadSourceMix, []);
 
   const counts = useMemo(() => {
     const next = { unreviewed: 0, approved: 0, rejected: 0 };

@@ -1,6 +1,6 @@
 import sqlite3
 
-from backend.db.repositories.base import BaseRepository
+from backend.db.repositories.base import BaseRepository, chunked
 from backend.domain.signal import Signal
 
 
@@ -26,8 +26,11 @@ class SignalRepository(BaseRepository):
 
     def for_person(self, person_id: str, before: str | None = None) -> list[Signal]:
         if before:
+            # Inclusive of the boundary date: a signal dated exactly on a founder's
+            # breakout day (e.g. fellowship-cohort seed signals) counts as known
+            # "as of breakout", so the backtest doesn't drop same-day evidence.
             rows = self.conn.execute(
-                "SELECT * FROM signals WHERE person_id = ? AND signal_date < ? ORDER BY signal_date",
+                "SELECT * FROM signals WHERE person_id = ? AND signal_date <= ? ORDER BY signal_date",
                 (person_id, before),
             ).fetchall()
         else:
@@ -36,15 +39,20 @@ class SignalRepository(BaseRepository):
             ).fetchall()
         return [self._to_model(r) for r in rows]
 
-    def unresolved(self) -> list[Signal]:
-        rows = self.conn.execute("SELECT * FROM signals WHERE person_id IS NULL").fetchall()
-        return [self._to_model(r) for r in rows]
-
-    def assign_person(self, signal_id: str, person_id: str) -> None:
-        self.conn.execute("UPDATE signals SET person_id = ? WHERE id = ?", (person_id, signal_id))
-
-    def commit(self) -> None:
-        self.conn.commit()
+    def for_people(self, person_ids: list[str]) -> dict[str, list[Signal]]:
+        """Batch variant of `for_person`: one query per chunk instead of one per
+        person, returning signals grouped by `person_id` (ascending signal_date)."""
+        grouped: dict[str, list[Signal]] = {pid: [] for pid in person_ids}
+        for chunk in chunked(person_ids, 400):
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self.conn.execute(
+                f"SELECT * FROM signals WHERE person_id IN ({placeholders}) ORDER BY signal_date",
+                tuple(chunk),
+            ).fetchall()
+            for row in rows:
+                model = self._to_model(row)
+                grouped.setdefault(model.person_id, []).append(model)
+        return grouped
 
     @staticmethod
     def _to_model(row: sqlite3.Row) -> Signal:

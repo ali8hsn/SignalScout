@@ -55,9 +55,7 @@ class Settings:
     openalex_mailto: str = field(default_factory=lambda: os.environ.get("OPENALEX_MAILTO", ""))
 
     # Licensed enrichment. Missing key -> provider absent from chain -> that lane no-ops.
-    # The chain is PDL-first, Coresignal-fallback; ENRICHMENT_PROVIDER is retained only as a
-    # legacy single-provider hint and no longer disables the other provider.
-    enrichment_provider: str = field(default_factory=lambda: os.environ.get("ENRICHMENT_PROVIDER", "pdl"))
+    # The chain is PDL-first, Coresignal-fallback; a provider is used whenever its key is present.
     pdl_api_key: str = field(default_factory=lambda: os.environ.get("PDL_API_KEY", ""))
     coresignal_api_key: str = field(default_factory=lambda: os.environ.get("CORESIGNAL_API_KEY", ""))
     # Exa AI semantic people-search — an independent LEAD discovery lane (search only,
@@ -76,8 +74,6 @@ class Settings:
     coresignal_daily_cap: int = field(default_factory=lambda: int(os.environ.get("CORESIGNAL_DAILY_CAP", "20")))
     # Exa's own separate daily search cap (records/day). Exa search is ~$7/1k requests.
     exa_daily_cap: int = field(default_factory=lambda: int(os.environ.get("EXA_DAILY_CAP", "20")))
-    # Legacy global daily counter setting; superseded by provider-scoped budgets above.
-    daily_enrichment_budget: int = field(default_factory=lambda: int(os.environ.get("DAILY_ENRICHMENT_BUDGET", "100")))
 
     # Subscriber digest delivery. Missing Resend credentials keeps delivery in preview mode.
     resend_api_key: str = field(default_factory=lambda: os.environ.get("RESEND_API_KEY", ""))

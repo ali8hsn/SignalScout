@@ -3,6 +3,7 @@
 const SOURCE_COLORS = {
   pdl_discovery: '#4E5D3A',
   coresignal_discovery: '#7A6B4E',
+  exa_discovery: '#8A7A2E',
   github: '#6B6B32',
   unspecified: '#8A8574',
 };

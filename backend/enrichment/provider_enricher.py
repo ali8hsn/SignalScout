@@ -63,12 +63,6 @@ def build_provider_chain(settings: Settings) -> list[EnrichmentProvider]:
     return chain
 
 
-def build_provider(settings: Settings) -> EnrichmentProvider | None:
-    """Back-compat single-provider selector (first available in the chain)."""
-    chain = build_provider_chain(settings)
-    return chain[0] if chain else None
-
-
 def build_search_providers(settings: Settings) -> list[EnrichmentProvider]:
     """Providers available to the SEARCH/lead lane (ProviderExpander).
 

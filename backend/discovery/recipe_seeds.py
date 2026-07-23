@@ -80,10 +80,12 @@ CORESIGNAL_RECIPES = [
         name="Young AI founders (Coresignal)",
         provider="coresignal",
         query_type="founder",
+        # employee_base has no company-founded-year filter (that lives on
+        # company_base — see `seed_stage_company_first`), so this recipe filters
+        # on title + tiny-company size + country only, which the endpoint supports.
         filters={
             "title": "Founder",
             "company_size_lte": 10,
-            "company_founded_gte": 2024,
             "country": "United States",
         },
         default_limit=20,
