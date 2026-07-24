@@ -88,6 +88,7 @@ class Container:
         self.discovery_recipe_service = DiscoveryRecipeService(
             self.discovery_recipes, self.provider_identities, self.provider_expander,
             self.provider_budget, self.enrichment_usage, self.persons,
+            per_recipe_cap=self.settings.provider_per_recipe_cap,
         )
         self.openalex_client = OpenAlexClient(mailto=self.settings.openalex_mailto)
         self.openalex_scraper = OpenAlexScraper(self.openalex_client)

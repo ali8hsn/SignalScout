@@ -31,6 +31,7 @@ class DiscoveryRecipeService:
         usage: EnrichmentUsageRepository,
         persons: PersonRepository,
         candidate_service=None,
+        per_recipe_cap: int | None = None,
     ):
         self.recipes = recipes
         self.identities = identities
@@ -39,6 +40,7 @@ class DiscoveryRecipeService:
         self.usage = usage
         self.persons = persons
         self.candidate_service = candidate_service
+        self.per_recipe_cap = per_recipe_cap
 
     def list_recipes(self) -> list[dict]:
         return [self._recipe_row(recipe) for recipe in self.recipes.all()]
@@ -82,7 +84,9 @@ class DiscoveryRecipeService:
         created_total = 0
         for recipe in due:
             try:
-                summary = self._run(recipe.id, dry_run=False, override_limit=None)
+                summary = self._run(
+                    recipe.id, dry_run=False, override_limit=self.per_recipe_cap
+                )
                 results.append({"recipe_id": recipe.id, "status": "ran", **summary})
                 created_total += int(summary.get("created") or 0)
             except Exception as exc:  # noqa: BLE001 — cron must continue across recipes
@@ -169,6 +173,7 @@ class DiscoveryRecipeService:
             "provider": recipe.provider,
             "provider_configured": self.expander.has_provider(recipe.provider),
             "reached_provider": reached_provider,
+            "skip_reason": result.skip_reason,
             "dry_run": dry_run,
             "attempted": result.attempted,
             "returned_records": result.returned_records,

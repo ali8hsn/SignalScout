@@ -3,7 +3,7 @@ import { api } from '../api/client.js';
 
 const EMPTY_FORM = {
   email: '',
-  frequency: 'weekly',
+  frequency: 'every_3_days',
   signalInterests: '',
   seedAccounts: '',
 };
@@ -111,6 +111,7 @@ export default function DigestSignup() {
               disabled={busy}
               className="w-full bg-cream border border-line rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-olive"
             >
+              <option value="every_3_days">Every 3 days</option>
               <option value="weekly">Weekly</option>
               <option value="daily">Daily</option>
             </select>

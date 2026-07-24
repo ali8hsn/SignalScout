@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS provider_search_checkpoints (
 CREATE TABLE IF NOT EXISTS subscribers (
     id TEXT PRIMARY KEY,
     email TEXT NOT NULL UNIQUE,
-    frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly')),
+    frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'every_3_days', 'weekly')),
     preferences TEXT NOT NULL DEFAULT '{}',
     unsubscribe_token TEXT NOT NULL UNIQUE,
     active INTEGER NOT NULL DEFAULT 1,

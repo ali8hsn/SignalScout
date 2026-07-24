@@ -1,6 +1,14 @@
 # Tests
 
-These files verify graph-expansion/scoring behavior, the subscriber digest pipeline and its API endpoints, small polish-phase API/CLI behaviors, the multi-provider enrichment chain and both provider-search discovery paths (batch `expand()` and the recipe layer's `run_recipe()`, including company-first discovery), free-source (fellowship/competition) lead extraction and resolution, adapter allowlisting/escaping and PDL's scroll-token pagination, and public-release security gating (auth, secret exposure, fail-closed config).
+These files verify graph-expansion/scoring behavior, the subscriber digest pipeline and its API endpoints, small polish-phase API/CLI behaviors, the multi-provider enrichment chain and both provider-search discovery paths (batch `expand()` and the recipe layer's `run_recipe()`, including company-first discovery), free-source (fellowship/competition) lead extraction and resolution, adapter allowlisting/escaping and PDL's scroll-token pagination, public-release security gating (auth, secret exposure, fail-closed config), and the Cory-ready release (interval digest cadence, the rotating upcoming-digest preview, recipe re-scan windows, run skip reasons, and the operator admin gate).
+
+## tests/test_cory_release.py
+Covers the Cory-ready release changes against temp SQLite `Container`s with a `StubSender`.
+
+- `DigestCadenceTests` — `_is_due` is interval-based (never-sent → due; just-sent → not due until the cadence window elapses) and `run_due` does not re-send inside the window.
+- `UpcomingDigestTests` — `GET /api/digest/upcoming` lists approved+contactable picks, rotates past people already featured in a delivered digest, and backfills verified-tier candidates (with 2+ contacts) flagged `provisional`.
+- `RecipeRescanAndSkipTests` — `ProviderExpander._due_for_rescan` respects the window (and never re-scans when `rescan_after is None`), and a run whose provider isn't configured reports `skip_reason == "provider_not_configured"`.
+- `AdminGateTests` — with `admin_secret` set, `POST /api/digests/send` and recipe approve require a matching `X-Admin-Secret` header (401 without), while read-only routes (`/api/discovery/recipes`, `/api/digest/upcoming`) stay open.
 
 ## tests/test_graph_expansion_deepening.py
 Covers GitHub REST call shaping, niche-repo surface-based graph expansion (stargazers/forkers/issue-PR interactions), Devpost/Semantic Scholar collaboration promotion with repeat-metadata, discovery-vs-founder scoring compounding, and opt-in idempotent fellowship seed loading, using fake GitHub/Devpost/Scholar clients (`FakeGithubClient`, `FakeDevpost`, `FakeScholarClient`, `RecordingSession`) against a temp SQLite `Container`.

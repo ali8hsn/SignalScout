@@ -1,6 +1,16 @@
 # frontend/components
 
-Reusable presentational components and view-model helpers shared across the Discover, Backtest, Digest, and Pipeline pages: candidate cards/tables, evidence detail panels, signal badges/timelines, pipeline progress, discovery dashboards, and the digest signup form.
+Reusable presentational components and view-model helpers shared across the Discover, Backtest, Digest, and Pipeline pages: candidate cards/tables, evidence detail panels, signal badges/timelines, pipeline progress, discovery dashboards, the digest signup form, and the operator unlock controls.
+
+## frontend/src/components/AdminOnly.jsx
+Renders its children only when the operator secret is unlocked (via `useAdmin`), hiding spend/send controls from the public product surface.
+
+- `AdminOnly({ children })` — returns `children` when `isAdmin`, else `null`.
+
+## frontend/src/components/AdminUnlock.jsx
+Discreet operator unlock affordance placed in the app footer.
+
+- `AdminUnlock()` — when locked, shows an "operator" link that expands to a password input; submitting stores the secret via `setAdminSecret` (unlocking spend/send controls for this browser). When unlocked, shows "OPERATOR ✓ · LOCK" to clear the stored secret.
 
 ## frontend/src/components/CandidateCard.jsx
 Single-candidate "profile card" view used in Discover's card-browsing mode, showing a score ring, thesis, top signals, and contact links.

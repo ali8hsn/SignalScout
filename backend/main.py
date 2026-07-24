@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.api.routes import build_router
 from backend.container import Container
+from backend.services.digest_scheduler import DigestScheduler
 from backend.services.discovery_scheduler import DiscoveryScheduler
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
@@ -25,12 +26,19 @@ def create_app() -> FastAPI:
             settings,
             container_factory=lambda: Container(settings),
         )
+        digest_scheduler = DigestScheduler(
+            settings,
+            container_factory=lambda: Container(settings),
+        )
         app.state.discovery_scheduler = scheduler
+        app.state.digest_scheduler = digest_scheduler
         scheduler.start()
+        digest_scheduler.start()
         try:
             yield
         finally:
             scheduler.stop()
+            digest_scheduler.stop()
 
     app = FastAPI(title="Signal Scout", version="0.1.0", lifespan=lifespan)
     app.state.container = container

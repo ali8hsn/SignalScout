@@ -19,7 +19,7 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 class SubscriberSignup(BaseModel):
     email: str = Field(min_length=3, max_length=320)
-    frequency: str = "daily"
+    frequency: str = "every_3_days"
     signal_interests: str = Field(default="", max_length=1000)
     seed_accounts: str = Field(default="", max_length=4000)
 
@@ -95,8 +95,11 @@ def build_router(container: Container) -> APIRouter:
         email = payload.email.strip().lower()
         if not EMAIL_RE.fullmatch(email):
             raise HTTPException(status_code=422, detail="Enter a valid email address.")
-        if payload.frequency not in {"daily", "weekly"}:
-            raise HTTPException(status_code=422, detail="Frequency must be daily or weekly.")
+        if payload.frequency not in {"daily", "every_3_days", "weekly"}:
+            raise HTTPException(
+                status_code=422,
+                detail="Frequency must be daily, every_3_days, or weekly.",
+            )
         seed_accounts = [
             account.strip()
             for account in payload.seed_accounts.split(",")
@@ -237,7 +240,8 @@ def build_router(container: Container) -> APIRouter:
         return {"digest": _digest_dict(digest)}
 
     @router.post("/digests/generate")
-    def generate_digest(request: Request):
+    def generate_digest(request: Request, x_admin_secret: str | None = Header(default=None)):
+        _require_admin(container, x_admin_secret)
         rate_limit(request, "generate-digest", 10, 60 * 60)
         digest = container.digest_generator.generate()
         return {"digest": _digest_dict(digest)}
@@ -262,7 +266,12 @@ def build_router(container: Container) -> APIRouter:
         return {"recipes": container.discovery_recipe_service.list_recipes()}
 
     @router.post("/discovery/recipes/{recipe_id}/approve")
-    def approve_discovery_recipe(recipe_id: str, request: Request):
+    def approve_discovery_recipe(
+        recipe_id: str,
+        request: Request,
+        x_admin_secret: str | None = Header(default=None),
+    ):
+        _require_admin(container, x_admin_secret)
         rate_limit(request, "recipe-approve", 30, 60 * 60)
         try:
             return container.discovery_recipe_service.approve(recipe_id)
@@ -274,7 +283,9 @@ def build_router(container: Container) -> APIRouter:
         recipe_id: str,
         request: Request,
         limit: int | None = Query(default=None),
+        x_admin_secret: str | None = Header(default=None),
     ):
+        _require_admin(container, x_admin_secret)
         rate_limit(request, "recipe-run", 12, 60 * 60)
         try:
             return container.discovery_recipe_service.run(recipe_id, override_limit=limit)
@@ -288,7 +299,9 @@ def build_router(container: Container) -> APIRouter:
         recipe_id: str,
         request: Request,
         limit: int | None = Query(default=None),
+        x_admin_secret: str | None = Header(default=None),
     ):
+        _require_admin(container, x_admin_secret)
         rate_limit(request, "recipe-dry-run", 30, 60 * 60)
         try:
             return container.discovery_recipe_service.dry_run(recipe_id, override_limit=limit)
@@ -300,12 +313,20 @@ def build_router(container: Container) -> APIRouter:
         return container.discovery_recipe_service.cost_summary()
 
     @router.post("/digests/send")
-    def send_digest(request: Request):
+    def send_digest(request: Request, x_admin_secret: str | None = Header(default=None)):
         """Send the current curated (approved + contactable) picks to every
         active subscriber right now via Resend. Falls back to preview receipts
         when Resend is unconfigured. Re-sends are deduped per subscriber."""
+        _require_admin(container, x_admin_secret)
         rate_limit(request, "send-digest", 3, 60 * 60)
         return {"summary": container.subscriber_digest.send_to_active()}
+
+    @router.get("/digest/upcoming")
+    def upcoming_digest():
+        """The next automated digest as subscribers will receive it: approved +
+        contactable picks (verified-tier backfill), rotating forward past everyone
+        already featured, plus auto-send status. Public/read-only."""
+        return container.subscriber_digest.upcoming()
 
     @router.get("/digest/preview")
     def preview_digest(email: str = Query(default="")):
@@ -450,6 +471,18 @@ def _candidate_source_mix(candidates: list[dict]) -> dict[str, int]:
         for source, count in candidate.get("source_counts", {}).items():
             counts[source] = counts.get(source, 0) + int(count)
     return dict(sorted(counts.items(), key=lambda item: -item[1]))
+
+
+def _require_admin(container: Container, supplied: str | None) -> None:
+    """Gate operator-only actions (recipe approve/run, digest send/generate)
+    behind ADMIN_SECRET (X-Admin-Secret header). When no secret is configured
+    (local dev / tests) the gate is open; once configured, it must match."""
+    configured = container.settings.admin_secret
+    if not configured:
+        return
+    value = (supplied or "").strip()
+    if not value or not hmac.compare_digest(value, configured):
+        raise HTTPException(status_code=401, detail="Operator action requires a valid admin secret.")
 
 
 def _require_cron_secret(container: Container, authorization: str | None) -> None:

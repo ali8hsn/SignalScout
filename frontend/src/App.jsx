@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { api } from './api/client.js';
+import AdminUnlock from './components/AdminUnlock.jsx';
 
 // Lazy-load each tab so the first Discover paint only ships Discover's chunk;
 // Backtest/Digest/Pipeline load on demand when their tab is first opened.
@@ -59,6 +60,9 @@ export default function App() {
           {tab === 'Pipeline' && <Pipeline />}
         </Suspense>
       </main>
+      <footer className="max-w-5xl mx-auto px-4 sm:px-6 pb-8 flex justify-end">
+        <AdminUnlock />
+      </footer>
     </div>
   );
 }

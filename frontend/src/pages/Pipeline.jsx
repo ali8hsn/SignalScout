@@ -2,7 +2,27 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import CostDashboard from '../components/CostDashboard.jsx';
 import SourceMixChart from '../components/SourceMixChart.jsx';
+import AdminOnly from '../components/AdminOnly.jsx';
 import { sourceLabel as providerLabel } from '../components/SignalBadge.jsx';
+
+const SKIP_LABELS = {
+  provider_not_configured: 'no API key configured — nothing ran, schedule untouched',
+  budget_exhausted: 'provider budget exhausted — schedule untouched, will retry next window',
+  up_to_date: 'already up to date — no new people until the next scheduled re-scan',
+};
+
+function runSummaryText(summary) {
+  if (summary.provider_configured === false) {
+    return `no ${providerLabel(summary.provider)} API key configured — nothing ran, schedule untouched`;
+  }
+  if (summary.skip_reason && SKIP_LABELS[summary.skip_reason]) {
+    return SKIP_LABELS[summary.skip_reason];
+  }
+  if (!summary.dryRun && summary.reached_provider === false) {
+    return 'provider not reached — schedule untouched, will retry';
+  }
+  return `${summary.created} created, ${summary.duplicates} duplicates, ${summary.merged} merged, ${summary.credit_units} credits${summary.dry_run ? ' (none spent)' : ''}`;
+}
 
 function outcomeBadge(r) {
   if (!r.provider_configured) {
@@ -109,11 +129,7 @@ export default function Pipeline() {
       {runSummary && (
         <div className="border border-olive/40 rounded-sm px-4 py-3 mb-5 font-mono text-[11px] text-ink-soft">
           {runSummary.dryRun ? 'Dry run' : 'Run'} of <span className="text-olive">{runSummary.id}</span>:{' '}
-          {runSummary.provider_configured === false
-            ? `no ${providerLabel(runSummary.provider)} API key configured — nothing ran, schedule untouched`
-            : (!runSummary.dryRun && runSummary.reached_provider === false)
-              ? 'provider not reached (budget exhausted) — schedule untouched, will retry'
-              : `${runSummary.created} created, ${runSummary.duplicates} duplicates, ${runSummary.merged} merged, ${runSummary.credit_units} credits${runSummary.dry_run ? ' (none spent)' : ''}`}
+          {runSummaryText(runSummary)}
         </div>
       )}
 
@@ -133,6 +149,11 @@ export default function Pipeline() {
             </tr>
           </thead>
           <tbody>
+            {recipes === null && !error && (
+              <tr>
+                <td colSpan={9} className="px-4 py-6 text-center text-ink-faint italic">Loading recipes…</td>
+              </tr>
+            )}
             {(recipes || []).map((r) => (
               <tr key={r.id} className="border-b border-line last:border-0">
                 <td className="px-4 py-3">
@@ -164,32 +185,34 @@ export default function Pipeline() {
                 </td>
                 <td className="px-4 py-3 font-mono text-[11px] text-ink-soft">{r.last_credit_units}</td>
                 <td className="px-4 py-3">
-                  <div className="flex gap-1.5 justify-end">
-                    {r.approval_state !== 'approved' && (
+                  <AdminOnly>
+                    <div className="flex gap-1.5 justify-end">
+                      {r.approval_state !== 'approved' && (
+                        <button
+                          onClick={() => approve(r.id)}
+                          disabled={busyId === r.id}
+                          className="border border-line text-ink-faint font-mono text-[10px] px-2.5 py-1 rounded-sm hover:border-olive hover:text-olive disabled:opacity-50"
+                        >
+                          APPROVE
+                        </button>
+                      )}
                       <button
-                        onClick={() => approve(r.id)}
+                        onClick={() => runRecipe(r.id, true)}
                         disabled={busyId === r.id}
                         className="border border-line text-ink-faint font-mono text-[10px] px-2.5 py-1 rounded-sm hover:border-olive hover:text-olive disabled:opacity-50"
                       >
-                        APPROVE
+                        DRY RUN
                       </button>
-                    )}
-                    <button
-                      onClick={() => runRecipe(r.id, true)}
-                      disabled={busyId === r.id}
-                      className="border border-line text-ink-faint font-mono text-[10px] px-2.5 py-1 rounded-sm hover:border-olive hover:text-olive disabled:opacity-50"
-                    >
-                      DRY RUN
-                    </button>
-                    <button
-                      onClick={() => runRecipe(r.id, false)}
-                      disabled={busyId === r.id || r.approval_state !== 'approved'}
-                      title={r.approval_state !== 'approved' ? 'Approve before running for real' : ''}
-                      className="bg-olive hover:bg-olive-dark disabled:bg-ink-faint text-cream font-mono text-[10px] px-2.5 py-1 rounded-sm"
-                    >
-                      {busyId === r.id ? '…' : 'RUN'}
-                    </button>
-                  </div>
+                      <button
+                        onClick={() => runRecipe(r.id, false)}
+                        disabled={busyId === r.id || r.approval_state !== 'approved'}
+                        title={r.approval_state !== 'approved' ? 'Approve before running for real' : ''}
+                        className="bg-olive hover:bg-olive-dark disabled:bg-ink-faint text-cream font-mono text-[10px] px-2.5 py-1 rounded-sm"
+                      >
+                        {busyId === r.id ? '…' : 'RUN'}
+                      </button>
+                    </div>
+                  </AdminOnly>
                 </td>
               </tr>
             ))}

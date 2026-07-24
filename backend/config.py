@@ -69,6 +69,10 @@ class Settings:
     pdl_search_split: float = field(default_factory=lambda: float(os.environ.get("PDL_SEARCH_SPLIT", "0.7")))
     # Max fresh provider lookups a single run/process may spend (guards runaway backfills).
     provider_per_run_cap: int = field(default_factory=lambda: int(os.environ.get("PROVIDER_PER_RUN_CAP", "100")))
+    # Max records a single recipe may pull per scheduled run. Caps one recipe's
+    # credit spend so it can't drain a provider's shared daily cap before the
+    # other due recipes on that provider get a turn (fair-share across a tick).
+    provider_per_recipe_cap: int = field(default_factory=lambda: int(os.environ.get("PROVIDER_PER_RECIPE_CAP", "10")))
     # Coresignal runs its OWN independent search + serves as PDL's no-match fallback; both
     # share this separate daily cap.
     coresignal_daily_cap: int = field(default_factory=lambda: int(os.environ.get("CORESIGNAL_DAILY_CAP", "20")))
@@ -91,6 +95,23 @@ class Settings:
     discovery_background_interval_hours: int = field(
         default_factory=lambda: int(os.environ.get("DISCOVERY_BACKGROUND_INTERVAL_HOURS", "6"))
     )
+
+    # Background digest delivery: periodically sends due subscriber digests without
+    # an external cron. Each subscriber still only receives one per cadence window
+    # (see FREQUENCY_INTERVALS), so ticking often is safe. Disable with
+    # DIGEST_BACKGROUND=0 (e.g. tests). Interval is the tick frequency, not cadence.
+    digest_background: bool = field(
+        default_factory=lambda: os.environ.get("DIGEST_BACKGROUND", "1").lower()
+        in ("1", "true", "yes")
+    )
+    digest_background_interval_hours: int = field(
+        default_factory=lambda: int(os.environ.get("DIGEST_BACKGROUND_INTERVAL_HOURS", "6"))
+    )
+
+    # Operator gate: recipe approve/run + digest send/generate require this secret
+    # (sent as the X-Admin-Secret header). Empty in dev leaves those controls open;
+    # production must set it so the public Cory-facing UI can't trigger spend.
+    admin_secret: str = field(default_factory=lambda: os.environ.get("ADMIN_SECRET", ""))
 
     # APP_ENV gates production-only restrictions (e.g. owner test-digest email).
     environment: str = field(default_factory=lambda: os.environ.get("APP_ENV", "development"))

@@ -40,6 +40,15 @@ logger = logging.getLogger(__name__)
 RECENT_EDUCATION_DAYS = 1095      # graduated within ~3 years still counts as recent
 CURRENT_EDUCATION_HORIZON = 1825  # started within ~5 years (still enrolled) counts
 RECENT_MOVEMENT_DAYS = 365
+
+# When a recipe's search space is exhausted, wait this long before re-scanning
+# it from the top. Fresh matches accrue over time; the dedupe ladder absorbs
+# people we've already stored (as duplicates) so a re-scan only adds newcomers.
+RECIPE_RESCAN_INTERVALS = {
+    "weekly": timedelta(days=7),
+    "biweekly": timedelta(days=14),
+}
+DEFAULT_RESCAN_INTERVAL = timedelta(days=7)
 FOUNDER_TITLE_TERMS = ("founder", "co-founder", "cofounder", "ceo", "chief executive")
 TECHNICAL_EDUCATION_TERMS = (
     "computer",
@@ -73,6 +82,10 @@ class ProviderExpansionResult:
     errors: int = 0  # provider search pages that failed (e.g. HTTP 422/5xx)
     rejection_reasons: dict[str, int] = field(default_factory=dict)
     planned_pages: list[dict] = field(default_factory=list)
+    # Why a run produced nothing, when that's an expected/benign condition rather
+    # than an error: provider_not_configured, budget_exhausted, or up_to_date
+    # (search space exhausted and not yet due for a re-scan). None = normal run.
+    skip_reason: str | None = None
 
 
 class ProviderExpander:
@@ -160,6 +173,7 @@ class ProviderExpander:
             raise PermissionError(f"recipe {recipe.id!r} requires approval before a real run")
         provider = self._provider_by_name(recipe.provider)
         if provider is None:
+            result.skip_reason = "provider_not_configured"
             return result
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         today = now[:10]
@@ -170,6 +184,7 @@ class ProviderExpander:
             return self._run_company_first(provider, recipe, result, dry_run=dry_run, limit=limit)
         filter_set = {**self._with_relative_filters(recipe), "label": recipe.name}
         dry_remaining = {recipe.provider: self.budget.remaining(recipe.provider, SEARCH)}
+        rescan_after = RECIPE_RESCAN_INTERVALS.get(recipe.frequency, DEFAULT_RESCAN_INTERVAL)
         self._run_filter_set(
             provider,
             filter_set,
@@ -184,6 +199,7 @@ class ProviderExpander:
             today=today,
             on_progress=None,
             admission=recipe.query_type,
+            rescan_after=rescan_after,
         )
         return result
 
@@ -338,6 +354,7 @@ class ProviderExpander:
         today: str,
         on_progress: Callable[[str, int], None] | None,
         admission: str = "student_technical",
+        rescan_after: timedelta | None = None,
     ) -> tuple[int, bool]:
         """Run one filter_set through checkpoint + budget + paging + ingest,
         mutating `result` in place. Returns (updated dry_reserved, stop) where
@@ -349,7 +366,13 @@ class ProviderExpander:
         filter_identity = self._filter_identity(filters)
         checkpoint = self.identities.checkpoint(provider.name, filter_identity)
         if checkpoint and checkpoint.exhausted:
-            return dry_reserved, False
+            if not self._due_for_rescan(checkpoint, rescan_after, now):
+                result.skip_reason = "up_to_date"
+                return dry_reserved, False
+            # Stale exhausted search space: restart from the top. A fresh
+            # checkpoint re-pages the query; the dedupe ladder skips people we
+            # already stored so only newcomers are created.
+            checkpoint = None
         checkpoint = checkpoint or ProviderSearchCheckpoint(
             provider=provider.name,
             filter_identity=filter_identity,
@@ -362,6 +385,7 @@ class ProviderExpander:
             else self.budget.remaining(provider.name, SEARCH)
         )
         if remaining <= 0:
+            result.skip_reason = "budget_exhausted"
             if not dry_run:
                 logger.warning(
                     "%s search budget exhausted — stopping search lane",
@@ -486,6 +510,31 @@ class ProviderExpander:
                 collect_credit_units=page.collect_credits,
             )
         return dry_reserved, False
+
+    @staticmethod
+    def _due_for_rescan(
+        checkpoint: ProviderSearchCheckpoint,
+        rescan_after: timedelta | None,
+        now_iso: str,
+    ) -> bool:
+        """True when an exhausted checkpoint is old enough to scan again. Only
+        recipe runs pass a `rescan_after` (their frequency window); the general
+        expand() lane passes None and never re-scans an exhausted filter set."""
+        if rescan_after is None:
+            return False
+        try:
+            last = datetime.fromisoformat(checkpoint.updated_at)
+        except (ValueError, TypeError):
+            return True
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        try:
+            now = datetime.fromisoformat(now_iso)
+        except (ValueError, TypeError):
+            now = datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        return (now - last) >= rescan_after
 
     def _load_config(self) -> dict:
         try:

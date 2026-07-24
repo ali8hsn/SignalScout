@@ -1,3 +1,12 @@
+function adminHeaders() {
+  try {
+    const secret = localStorage.getItem('ss_admin_secret');
+    return secret ? { 'X-Admin-Secret': secret } : {};
+  } catch {
+    return {};
+  }
+}
+
 async function request(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   const resp = await fetch(path, { ...options, headers });
@@ -22,8 +31,9 @@ export const api = {
   candidate: (id) => request(`/api/candidates/${id}`),
   backtest: () => request('/api/backtest'),
   latestDigest: () => request('/api/digests/latest'),
-  generateDigest: () => request('/api/digests/generate', { method: 'POST' }),
-  sendDigest: () => request('/api/digests/send', { method: 'POST' }),
+  upcomingDigest: () => request('/api/digest/upcoming'),
+  generateDigest: () => request('/api/digests/generate', { method: 'POST', headers: adminHeaders() }),
+  sendDigest: () => request('/api/digests/send', { method: 'POST', headers: adminHeaders() }),
   subscribe: (payload) => request('/api/subscribers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -37,13 +47,13 @@ export const api = {
   discoveryRecipes: () => request('/api/discovery/recipes'),
   runRecipe: (id, limit) => request(
     `/api/discovery/recipes/${id}/run${limit ? `?limit=${limit}` : ''}`,
-    { method: 'POST' },
+    { method: 'POST', headers: adminHeaders() },
   ),
   dryRunRecipe: (id, limit) => request(
     `/api/discovery/recipes/${id}/dry-run${limit ? `?limit=${limit}` : ''}`,
-    { method: 'POST' },
+    { method: 'POST', headers: adminHeaders() },
   ),
-  approveRecipe: (id) => request(`/api/discovery/recipes/${id}/approve`, { method: 'POST' }),
+  approveRecipe: (id) => request(`/api/discovery/recipes/${id}/approve`, { method: 'POST', headers: adminHeaders() }),
   discoveryCostSummary: () => request('/api/discovery/cost-summary'),
   reviewCandidate: (id, payload) => request(`/api/candidate-reviews/${id}`, {
     method: 'PUT',

@@ -1,7 +1,7 @@
 """Build and deliver personalized, never-repeat subscriber digests."""
 
 import html
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 from backend.db.repositories.subscriptions import (
@@ -12,6 +12,17 @@ from backend.digest.sender import EmailMessage, EmailSender
 from backend.domain.subscriber import Subscriber
 from backend.security.email_actions import EmailActionSigner
 from backend.services.candidate_service import CandidateService
+
+# How long to wait between digests for each cadence. A subscriber is "due" only
+# when their most recent successful send is older than this window, which makes
+# run_due idempotent: re-ticking (or a redundant Railway cron) never double-sends.
+FREQUENCY_INTERVALS = {
+    "daily": timedelta(days=1),
+    "every_3_days": timedelta(days=3),
+    "weekly": timedelta(days=7),
+}
+DEFAULT_FREQUENCY = "every_3_days"
+DEFAULT_INTERVAL = FREQUENCY_INTERVALS[DEFAULT_FREQUENCY]
 
 
 class SubscriberDigestService:
@@ -47,31 +58,138 @@ class SubscriberDigestService:
             else self.candidates.list_candidates("discovery")
         )
         sent_ids = self.sends.sent_person_ids(subscriber.id)
-        pool = [
-            candidate
-            for candidate in candidates
-            if candidate["id"] not in sent_ids
-            and candidate.get("approval_state") == "approved"
-            and candidate.get("contactable")
-        ]
-        pool.sort(
-            key=lambda candidate: (
-                candidate.get("approved_at") or "",
-                self._preference_rank(candidate, subscriber),
-            ),
-            reverse=True,
-        )
-        picks = pool[: self.size]
+        picks, provisional_ids = self._select_picks(candidates, sent_ids, subscriber=subscriber)
         today = datetime.now(timezone.utc).date().isoformat()
         subject = f"Signal Scout — {len(picks)} people to know ({today})"
         return (
             EmailMessage(
                 subject=subject,
-                html=self._render_html(subscriber, picks, today),
-                text=self._render_text(subscriber, picks, today),
+                html=self._render_html(subscriber, picks, today, provisional_ids),
+                text=self._render_text(subscriber, picks, today, provisional_ids),
             ),
             [candidate["id"] for candidate in picks],
         )
+
+    def _select_picks(
+        self,
+        candidates: list[dict],
+        exclude_ids: set[str],
+        subscriber: Subscriber | None = None,
+    ) -> tuple[list[dict], set[str]]:
+        """Pick up to `size` people not in `exclude_ids`.
+
+        Primary pool is operator-approved + contactable, newest approvals first
+        (then subscriber preference/score). If that runs short, backfill with the
+        top-scored verified-tier contactable candidates so a digest never goes
+        empty between review sessions; those backfilled ids are returned so the
+        renderer can mark them as provisional (awaiting operator review)."""
+        approved = [
+            candidate
+            for candidate in candidates
+            if candidate["id"] not in exclude_ids
+            and candidate.get("approval_state") == "approved"
+            and candidate.get("contactable")
+        ]
+        approved.sort(
+            key=lambda candidate: (
+                candidate.get("approved_at") or "",
+                self._preference_rank(candidate, subscriber)
+                if subscriber is not None
+                else (0, float(candidate.get("score") or 0)),
+            ),
+            reverse=True,
+        )
+        picks = approved[: self.size]
+        provisional_ids: set[str] = set()
+        if len(picks) < self.size:
+            chosen = {candidate["id"] for candidate in picks}
+            # Backfill candidates are not yet operator-approved, so they won't carry
+            # the review `contactable` flag; gate them on real contact links instead.
+            fallback = [
+                candidate
+                for candidate in candidates
+                if candidate["id"] not in exclude_ids
+                and candidate["id"] not in chosen
+                and candidate.get("evidence_tier") == "verified"
+                and self._has_contacts(candidate)
+            ]
+            fallback.sort(key=lambda candidate: float(candidate.get("score") or 0), reverse=True)
+            for candidate in fallback[: self.size - len(picks)]:
+                picks.append(candidate)
+                provisional_ids.add(candidate["id"])
+        return picks, provisional_ids
+
+    @staticmethod
+    def _has_contacts(candidate: dict) -> bool:
+        links = candidate.get("contact_links") or {}
+        return sum(bool(links.get(key)) for key in ("github", "linkedin", "x", "email", "site")) >= 2
+
+    def upcoming(self) -> dict:
+        """Operator-facing preview of the NEXT automated digest. Selection mirrors
+        real subscriber emails (approved + contactable, verified-tier backfill),
+        but excludes everyone already featured in any delivered digest so the
+        preview rotates forward as automated sends fire."""
+        self.candidates.rescore_all()
+        candidates = self.candidates.list_candidates("discovery")
+        featured = self.sends.all_sent_person_ids()
+        picks, provisional_ids = self._select_picks(candidates, featured, subscriber=None)
+        entries = [
+            self._entry(candidate, candidate["id"] in provisional_ids)
+            for candidate in picks
+        ]
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "entries": entries,
+            "auto_send": self._auto_send_status(),
+            "featured_count": len(featured),
+        }
+
+    def _auto_send_status(self) -> dict:
+        active = self.subscribers.active()
+        last = self.sends.last_sent_at()
+        cadence_counts: dict[str, int] = {}
+        for subscriber in active:
+            cadence_counts[subscriber.frequency] = cadence_counts.get(subscriber.frequency, 0) + 1
+        return {
+            "active_subscribers": len(active),
+            "last_sent_at": last.isoformat(timespec="seconds") if last else None,
+            "default_cadence": DEFAULT_FREQUENCY,
+            "cadence_counts": cadence_counts,
+        }
+
+    @staticmethod
+    def _entry(candidate: dict, provisional: bool) -> dict:
+        school = candidate.get("school") or ""
+        year = candidate.get("graduation_year")
+        school_line = f"{school} '{str(year)[2:]}" if school and year else school
+        area = candidate.get("area")
+        if area:
+            school_line = " • ".join(part for part in [school_line, area] if part)
+        origin = candidate.get("origin_location")
+        current = candidate.get("current_location")
+        if origin and current and origin != current:
+            location_line = f"From {origin} — now in {current}"
+        elif current or origin:
+            location_line = f"Based in {current or origin}"
+        else:
+            location_line = ""
+        return {
+            "person_id": candidate["id"],
+            "name": candidate["name"],
+            "score": candidate.get("score") or 0,
+            "school_line": school_line,
+            "location_line": location_line,
+            "thesis": candidate.get("thesis") or "",
+            "top_signals": [
+                signal.get("summary") or signal.get("type") or "Signal recorded"
+                for signal in candidate.get("top_signals") or []
+            ],
+            "connection_context": candidate.get("connection_context") or "",
+            "warm_intro": candidate.get("warm_intro") or "",
+            "why_now": candidate.get("reviewed_why_now") or candidate.get("why_now") or "",
+            "contact_links": candidate.get("contact_links") or {},
+            "provisional": provisional,
+        }
 
     def preview(self, subscriber: Subscriber) -> dict:
         all_candidates = self.candidates.list_candidates("discovery")
@@ -134,16 +252,21 @@ class SubscriberDigestService:
         recipient: str | None = None,
         now: datetime | None = None,
     ) -> dict:
+        """Deliver to every active subscriber whose cadence window has elapsed.
+
+        Cadence is interval-based (see FREQUENCY_INTERVALS): a subscriber is due
+        only when their last successful send is older than their interval, so
+        ticking this repeatedly — or running it from both the in-process
+        scheduler and a Railway cron — never double-sends. A `recipient` bypasses
+        the cadence check (used for targeted preview/test sends)."""
         run_at = now or datetime.now(timezone.utc)
         self.candidates.rescore_all()
-        due = self.subscribers.active(email=recipient)
-        if recipient is None:
-            due = [
-                subscriber
-                for subscriber in due
-                if subscriber.frequency == "daily"
-                or (subscriber.frequency == "weekly" and run_at.weekday() == 0)
-            ]
+        active = self.subscribers.active(email=recipient)
+        due = (
+            active
+            if recipient is not None
+            else [subscriber for subscriber in active if self._is_due(subscriber, run_at)]
+        )
         all_candidates = self.candidates.list_candidates("discovery")
         results = [
             self.deliver(subscriber, dry_run=dry_run, all_candidates=all_candidates)
@@ -156,6 +279,10 @@ class SubscriberDigestService:
             "sent_count": sum(result["status"] == "sent" for result in results),
             "results": results,
         }
+
+    def _is_due(self, subscriber: Subscriber, run_at: datetime) -> bool:
+        interval = FREQUENCY_INTERVALS.get(subscriber.frequency, DEFAULT_INTERVAL)
+        return not self.sends.sent_since(subscriber.id, run_at - interval)
 
     def send_to_active(self, dry_run: bool = False, now: datetime | None = None) -> dict:
         """Operator "send now": deliver to every active subscriber immediately,
@@ -210,11 +337,24 @@ class SubscriberDigestService:
             f"?token={quote(token, safe='')}"
         )
 
-    def _render_html(self, subscriber: Subscriber, picks: list[dict], today: str) -> str:
+    def _render_html(
+        self,
+        subscriber: Subscriber,
+        picks: list[dict],
+        today: str,
+        provisional_ids: set[str] | None = None,
+    ) -> str:
         esc = html.escape
+        provisional_ids = provisional_ids or set()
         blocks: list[str] = []
         for candidate in picks:
             person_id = candidate["id"]
+            provisional_note = (
+                '<div style="color:#8a6d1f;font:11px ui-monospace,monospace;margin-top:8px">'
+                "Provisional — surfaced by evidence, pending operator review</div>"
+                if person_id in provisional_ids
+                else ""
+            )
             signals = candidate.get("top_signals") or []
             signal_items = "".join(
                 f"<li>{esc(signal.get('summary') or signal.get('type') or 'Signal recorded')}</li>"
@@ -257,6 +397,7 @@ class SubscriberDigestService:
                   <p style="font-size:15px;line-height:1.45;margin:12px 0">{esc(description)}</p>
                   <div style="font-size:13px;line-height:1.5"><strong>Triggering signals</strong><ul style="padding-left:20px;margin:6px 0 12px">{signal_items}</ul></div>
                   <div style="font:12px ui-monospace,monospace">{links}{provenance_link}</div>
+                  {provisional_note}
                   <div style="border-top:1px solid #e4e0d2;margin-top:14px;padding-top:10px;font-size:13px">
                     Useful?
                     <a href="{esc(up_url, quote=True)}" style="text-decoration:none;margin-left:8px">👍 Yes</a>
@@ -279,7 +420,14 @@ class SubscriberDigestService:
   </main>
 </body></html>"""
 
-    def _render_text(self, subscriber: Subscriber, picks: list[dict], today: str) -> str:
+    def _render_text(
+        self,
+        subscriber: Subscriber,
+        picks: list[dict],
+        today: str,
+        provisional_ids: set[str] | None = None,
+    ) -> str:
+        provisional_ids = provisional_ids or set()
         lines = [f"SIGNAL SCOUT — {len(picks)} people — {today}", ""]
         for index, candidate in enumerate(picks, 1):
             context = " · ".join(
@@ -299,6 +447,8 @@ class SubscriberDigestService:
             lines.extend([f"{index}. {candidate['name']} ({float(candidate.get('score') or 0):.0f})"])
             if context:
                 lines.append(context)
+            if candidate["id"] in provisional_ids:
+                lines.append("[Provisional — surfaced by evidence, pending operator review]")
             lines.append(description)
             lines.append("Triggering signals:")
             for signal in candidate.get("top_signals") or []:

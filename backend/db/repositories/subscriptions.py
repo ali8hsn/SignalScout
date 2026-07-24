@@ -1,12 +1,72 @@
 """Persistence for subscribers, never-repeat sends, and feedback votes."""
 
+import sqlite3
 from datetime import datetime
 
+from backend.db.database import Database
 from backend.db.repositories.base import BaseRepository
 from backend.domain.subscriber import Subscriber, utc_now
 
+# Frequencies allowed on the subscribers table. Older databases were created
+# with a CHECK constraint of only ('daily','weekly'); _migrate_frequencies
+# relaxes that in place so 'every_3_days' signups are accepted.
+ALLOWED_FREQUENCIES = ("daily", "every_3_days", "weekly")
+
 
 class SubscriberRepository(BaseRepository):
+    def __init__(self, db: Database):
+        super().__init__(db)
+        self._migrate_frequencies()
+
+    def _migrate_frequencies(self) -> None:
+        """Widen the frequency CHECK constraint on pre-existing tables. Fresh DBs
+        already get the full set from schema.sql; this only patches older ones."""
+        try:
+            if self.db.backend == "postgres":
+                self.conn.execute(
+                    "ALTER TABLE subscribers DROP CONSTRAINT IF EXISTS subscribers_frequency_check"
+                )
+                self.conn.execute(
+                    "ALTER TABLE subscribers ADD CONSTRAINT subscribers_frequency_check "
+                    "CHECK (frequency IN ('daily', 'every_3_days', 'weekly'))"
+                )
+                self.conn.commit()
+                return
+            self._migrate_frequencies_sqlite()
+        except (sqlite3.OperationalError, sqlite3.IntegrityError):
+            # Best-effort: a fresh schema already allows every_3_days, and a
+            # partially-migrated dev DB should never block startup.
+            pass
+
+    def _migrate_frequencies_sqlite(self) -> None:
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='subscribers'"
+        ).fetchone()
+        if not row or not row["sql"] or "every_3_days" in row["sql"]:
+            return  # table missing or already migrated
+        self.conn.execute("PRAGMA foreign_keys = OFF")
+        self.conn.executescript(
+            """
+            CREATE TABLE subscribers_new (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'every_3_days', 'weekly')),
+                preferences TEXT NOT NULL DEFAULT '{}',
+                unsubscribe_token TEXT NOT NULL UNIQUE,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO subscribers_new SELECT * FROM subscribers;
+            DROP TABLE subscribers;
+            ALTER TABLE subscribers_new RENAME TO subscribers;
+            CREATE INDEX IF NOT EXISTS idx_subscribers_active_frequency
+                ON subscribers(active, frequency);
+            """
+        )
+        self.conn.commit()
+        self.conn.execute("PRAGMA foreign_keys = ON")
+
     def subscribe(self, email: str, frequency: str, preferences: dict) -> Subscriber:
         subscriber = Subscriber(
             email=email.strip().lower(),
@@ -105,6 +165,26 @@ class DigestSendRepository(BaseRepository):
             (subscriber_id,),
         ).fetchall()
         return {row["person_id"] for row in rows}
+
+    def all_sent_person_ids(self) -> set[str]:
+        """Everyone already featured in a delivered digest, across all subscribers.
+        Used to advance the operator-facing "next digest" preview so it rotates
+        as automated sends fire instead of showing the same people forever."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT person_id FROM digest_sends"
+        ).fetchall()
+        return {row["person_id"] for row in rows}
+
+    def last_sent_at(self) -> datetime | None:
+        row = self.conn.execute(
+            "SELECT MAX(sent_at) AS last FROM digest_sends"
+        ).fetchone()
+        if not row or not row["last"]:
+            return None
+        try:
+            return datetime.fromisoformat(row["last"])
+        except ValueError:
+            return None
 
     def record_many(
         self,

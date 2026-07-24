@@ -171,7 +171,9 @@ Manages the `signals` table, which stores discrete detected events (e.g. job cha
 ## backend/db/repositories/subscriptions.py
 Three repositories covering the digest-email subscription lifecycle: `SubscriberRepository` (`subscribers` table — email list membership and preferences), `DigestSendRepository` (`digest_sends` table — per-subscriber send history to prevent repeats), and `FeedbackRepository` (`feedback_votes` table — subscriber up/down votes on persons).
 
-- `SubscriberRepository` — CRUD access to `subscribers`.
+- `SubscriberRepository` — CRUD access to `subscribers`. Module constant `ALLOWED_FREQUENCIES` = `('daily','every_3_days','weekly')`.
+  - `SubscriberRepository.__init__(db)` — runs `_migrate_frequencies` so pre-existing databases accept the `every_3_days` cadence.
+  - `SubscriberRepository._migrate_frequencies()` / `._migrate_frequencies_sqlite()` — idempotently widen the `frequency` CHECK constraint: on Postgres drop/re-add `subscribers_frequency_check`; on SQLite rebuild the table only when its stored DDL predates `every_3_days`. Best-effort (swallows errors) so startup never blocks.
   - `SubscriberRepository.subscribe(email, frequency, preferences)` — creates a new `Subscriber` domain object and upserts it (`ON CONFLICT(email)` updates frequency/preferences/reactivates), returning the persisted record.
   - `SubscriberRepository.get_by_email(email)` — fetches a subscriber by normalized (trimmed, lower-cased) email.
   - `SubscriberRepository.get(subscriber_id)` — fetches a subscriber by id.
@@ -179,8 +181,10 @@ Three repositories covering the digest-email subscription lifecycle: `Subscriber
   - `SubscriberRepository.deactivate(token) -> bool` — sets `active = 0` for the subscriber matching an unsubscribe token; returns whether a row was actually updated.
   - `SubscriberRepository._to_model(row) -> Subscriber` — converts a DB row into a `Subscriber`, decoding the JSON `preferences` column.
 - `DigestSendRepository` — tracks which persons have been sent to which subscribers.
-  - `DigestSendRepository.sent_since(subscriber_id, since)` — returns whether any digest was sent to a subscriber at/after a given datetime.
+  - `DigestSendRepository.sent_since(subscriber_id, since)` — returns whether any digest was sent to a subscriber at/after a given datetime (backs cadence due-checks).
   - `DigestSendRepository.sent_person_ids(subscriber_id) -> set[str]` — returns the set of person ids already sent to a subscriber (for never-repeat filtering).
+  - `DigestSendRepository.all_sent_person_ids() -> set[str]` — the union of person ids featured in any delivered digest across all subscribers (advances the operator-facing upcoming-digest preview so it rotates).
+  - `DigestSendRepository.last_sent_at() -> datetime | None` — the most recent send timestamp across all subscribers (for auto-send status), or `None` when nothing has been sent.
   - `DigestSendRepository.record_many(subscriber_id, person_ids, provider_message_id)` — records one send row per person id for a subscriber, ignoring duplicates (`ON CONFLICT(subscriber_id, person_id) DO NOTHING`).
 - `FeedbackRepository` — records subscriber feedback votes on persons.
   - `FeedbackRepository.upsert(subscriber_id, person_id, vote)` — inserts or updates (`ON CONFLICT(subscriber_id, person_id)`) a subscriber's vote for a person, refreshing `updated_at`.
